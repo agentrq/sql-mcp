@@ -1,12 +1,12 @@
 .PHONY: dev backend frontend build test test-backend test-frontend fmt stop
 
-# Start the backend (:3000) and the Vite dev server (:5173) together.
+# The backend, then the Vite dev server on :5173 once the backend is up.
+# A missing backend/.env is created with development secrets (scripts/dev-env.sh).
 dev:
-	@make -j 2 backend frontend
+	@./scripts/dev.sh
 
-# The backend needs backend/.env; copy .env.example to start.
 backend:
-	@cd backend && test -f .env || { echo "backend/.env is missing: cp .env.example backend/.env and fill in the secrets"; exit 1; }
+	@./scripts/dev-env.sh
 	@cd backend && go run ./cmd/server
 
 frontend:

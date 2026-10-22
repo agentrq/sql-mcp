@@ -21,6 +21,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': apiTarget,
+      // Only the admin API: /admin and /admin/login are the web app's pages.
+      '/admin/api': apiTarget,
       '/mcp': apiTarget,
       '/.well-known': apiTarget,
     },
