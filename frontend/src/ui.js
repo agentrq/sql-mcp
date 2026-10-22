@@ -1,0 +1,11 @@
+// Class strings shared across pages, so buttons and inputs look the same everywhere (see AGENTS.md).
+export const BTN_PRIMARY = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-black dark:bg-white text-white dark:text-black text-[11px] font-black uppercase tracking-widest hover:opacity-80 transition-all shrink-0 border border-transparent disabled:opacity-40 disabled:cursor-not-allowed'
+export const BTN_SECONDARY = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 text-gray-900 dark:text-zinc-100 text-[11px] font-black uppercase tracking-widest hover:border-gray-900 dark:hover:border-white transition-all shrink-0 disabled:opacity-40 disabled:cursor-not-allowed'
+export const BTN_DANGER = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-[11px] font-black uppercase tracking-widest hover:bg-red-50 dark:hover:bg-red-500/10 transition-all shrink-0 disabled:opacity-40'
+export const BTN_GHOST = 'inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40'
+export const INPUT = 'w-full bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-800 rounded-lg px-4 py-2.5 text-sm focus:border-gray-900 dark:focus:border-white focus:ring-0 outline-none font-medium text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500 transition-all'
+export const LABEL = 'block text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest ml-1 mb-2'
+export const HINT = 'text-[11px] text-gray-500 dark:text-zinc-500 font-medium ml-1 mt-2'
+export const CARD = 'bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 rounded-xl'
+export const PAGE_TITLE = 'text-xl md:text-2xl font-black text-gray-800 dark:text-zinc-200 leading-tight'
+export const SECTION_LABEL = 'text-[10px] font-black text-gray-500 dark:text-zinc-400 uppercase tracking-widest'
