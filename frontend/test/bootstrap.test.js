@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
-import { clickOutside, createAuthGuard, createSqlMcpApp, pageKey, routes } from '../src/app'
+import { clickOutside, createAuthGuard, createSqlMcpApp, pageKey, routes } from '../src/bootstrap'
 
 describe('auth guard', () => {
   it('lets public routes through without a lookup', async () => {
@@ -22,7 +22,7 @@ describe('auth guard', () => {
   })
 })
 
-describe('app', () => {
+describe('bootstrap', () => {
   it('keys pages by path', () => {
     expect(pageKey({ path: '/databases/1', fullPath: '/databases/1?tab=pii' })).toBe('/databases/1')
   })

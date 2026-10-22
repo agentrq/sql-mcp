@@ -6,7 +6,7 @@ import {
   adminBase, checkAdminEmail, fetchAdminConfig, fetchAdminSession, fetchAdminSettings,
   resetAdminSettings, saveAdminSettings,
 } from '../src/api'
-import { clickOutside, createAdminGuard, createSqlMcpApp, routes } from '../src/app'
+import { clickOutside, createAdminGuard, createSqlMcpApp, routes } from '../src/bootstrap'
 import App from '../src/App.vue'
 import AdminLoginView from '../src/views/AdminLoginView.vue'
 import AdminView from '../src/views/AdminView.vue'

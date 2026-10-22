@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend build test test-backend test-frontend fmt stop
+.PHONY: dev backend frontend build test test-backend test-frontend check-case fmt stop
 
 # The backend, then the Vite dev server on :5173 once the backend is up.
 # A missing backend/.env is created with development secrets (scripts/dev-env.sh).
@@ -19,7 +19,11 @@ build:
 	@cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/sql-mcp ./cmd/server
 	@echo "built backend/bin/sql-mcp; run it from backend/ (it serves ./public)"
 
-test: test-backend test-frontend
+test: check-case test-backend test-frontend
+
+# Paths that differ only by case break checkouts on macOS and Windows.
+check-case:
+	@./scripts/check-case.sh
 
 # The Postgres driver's tests run when SQLMCP_TEST_PG_DSN names a database; see README.
 test-backend:

@@ -50,6 +50,10 @@ app state). A handler never calls the repository directly.
   route such as `/databases/x` serves a blank page.
 - **Content is full width**, like AgentRQ: views don't cap their width
   with `max-w-*`. Only prose paragraphs and modals are narrowed.
+- **No two paths may differ only by letter case** (`App.test.js` next to
+  `app.test.js`). On macOS and Windows they are the same file, so the
+  checkout comes out broken. `make check-case`, part of `make test`, fails on
+  such a pair.
 - **The UI reuses the class strings in `frontend/src/ui.js`.** Don't
   restyle buttons or inputs inline.
 
