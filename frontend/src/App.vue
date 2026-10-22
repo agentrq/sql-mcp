@@ -160,7 +160,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { pageKey } from './app'
+import { pageKey } from './bootstrap'
 import AppLogo from './components/AppLogo.vue'
 import SidebarDatabases from './components/SidebarDatabases.vue'
 import Toast from './components/Toast.vue'

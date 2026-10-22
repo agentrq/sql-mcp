@@ -16,7 +16,7 @@ export default defineConfig({
     css: false,
     coverage: {
       provider: 'v8',
-      include: ['src/api.js', 'src/app.js', 'src/composables/**/*.js', 'src/stores/**/*.js', 'src/utils/**/*.js'],
+      include: ['src/api.js', 'src/bootstrap.js', 'src/composables/**/*.js', 'src/stores/**/*.js', 'src/utils/**/*.js'],
       reporter: ['text', 'lcov'],
       thresholds: {
         lines: 95,

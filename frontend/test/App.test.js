@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createMemoryHistory } from 'vue-router'
-import { createSqlMcpApp, clickOutside } from '../src/app'
+import { createSqlMcpApp, clickOutside } from '../src/bootstrap'
 import App from '../src/App.vue'
 import { flush, jsonResponse, mockFetch } from './helpers'
 

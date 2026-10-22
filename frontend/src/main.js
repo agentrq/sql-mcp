@@ -3,7 +3,7 @@ import { createWebHistory } from 'vue-router'
 import './style.css'
 import '@fontsource-variable/inter'
 
-import { createSqlMcpApp } from './app'
+import { createSqlMcpApp } from './bootstrap'
 
 // The backend injects the base path the app is served under.
 const { app } = createSqlMcpApp({
