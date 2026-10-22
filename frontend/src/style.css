@@ -1,0 +1,55 @@
+@import 'tailwindcss';
+
+@source './';
+
+@custom-variant dark (&:where(.dark, .dark *));
+@import '@fontsource-variable/inter';
+
+:root {
+  --accent: #000000;
+  --accent-bg: rgba(0, 0, 0, 0.05);
+  color-scheme: light;
+}
+
+.dark {
+  --accent: #ffffff;
+  --accent-bg: rgba(255, 255, 255, 0.1);
+  color-scheme: dark;
+}
+
+/* The page card: white on the zinc shell, and the shell's colour on a phone in dark mode. */
+@utility page-surface {
+  background-color: var(--color-white);
+  @variant dark { background-color: var(--color-zinc-950); }
+  @variant md { @variant dark { background-color: var(--color-zinc-900); } }
+}
+
+@theme {
+  --font-inter: "Inter Variable", "Inter", sans-serif;
+  --color-accent: var(--accent);
+}
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  font-family: "Inter Variable", "Inter", sans-serif;
+  font-feature-settings: "liga" 1, "calt" 1, "ss01" 1, "cv03" 1, "cv04" 1;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
+::selection { background-color: #fef08a; color: #000; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #d1d5db; }
+.dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #52525b; }
