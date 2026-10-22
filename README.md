@@ -26,11 +26,12 @@ a preview plus the URL.
 You need Go 1.27+ and Node 24+.
 
 ```sh
-cp .env.example backend/.env
-# Fill in JWT_SECRET, ENCRYPTION_KEY and ALLOWED_EMAILS, then either
-# GOOGLE_CLIENT_ID/SECRET or ROOT_LOGIN_ENABLED=true with ROOT_TOKEN.
-make dev        # backend on :3000, web app on :5173
+make dev        # backend on :3000, web app on http://localhost:5173
 ```
+
+On the first run `make dev` writes `backend/.env` with fresh development
+secrets and root-token sign-in, and prints the root token. Edit that file to
+add Google sign-in or more allowed emails.
 
 For production:
 
