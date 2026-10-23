@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  # The standard set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  exclusions:
+    # Unchecked Close, Flush and fmt.Fprint*: errors with nothing useful to do
+    # on failure (closing a response body, writing to a terminal).
+    presets:
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofmt
