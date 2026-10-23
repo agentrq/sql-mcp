@@ -98,6 +98,32 @@ registration, RFC 8414/9728 discovery and a server-rendered consent page:
 One tool, `sql`, taking `{ action, payload }`: `listTables`, `describeTable`,
 `query`, `help`.
 
+Answers are [TOON](https://toonformat.dev) text (spec v3, comma-delimited),
+which spends fewer tokens than JSON: a table names its columns once, then
+gives one line per row. `help` answers in prose; an error is `error: <message>`
+with `isError` set.
+
+```
+listTables     tables[N]{table,kind,columns}:   then   pii[M]{table,column}:
+describeTable  table: public.users
+               kind: table
+               columns[N]{name,type,pii}:
+                 id,integer,false
+query          rowCount: 120
+               rowsShown: 25                     (when cut to the inline limit)
+               truncated: false                  (true when QUERY_MAX_ROWS cut it)
+               durationMs: 4
+               resultUrl: "https://..."          (the whole result as CSV, when stored)
+               resultExpiresAt: "RFC3339"
+               note: ...                         (why it could not be stored)
+               rows[25]{id,name}:
+                 1,alice
+                 2,null
+```
+
+A query result shows at most the inline limit (`QUERY_INLINE_ROWS`, default 25)
+of its rows.
+
 ## Admin (`/admin/api/v1`)
 
 The server setup, for whoever holds `ROOT_TOKEN`; disabled while it is unset.
@@ -114,7 +140,7 @@ token. There is no refresh: sign in again after an hour.
 | POST | `/logout` | | 204, clears the cookie (public) |
 | GET | `/session` | | `{ "expiresAt" }` |
 | GET | `/settings` | | `{ "allowedEmails": [], "queryMaxRows", "queryInlineRows", "queryTimeoutSeconds", "source": "env" \| "saved", "updatedAt"?, "server": { "baseUrl", "sslEnabled", "domain", "httpsPort", "googleLoginEnabled", "rootLoginEnabled", "appDbDriver", "tmphostApiUrl" } }` |
-| PUT | `/settings` | `{ "allowedEmails": ["*@agentrq.com"], "queryMaxRows": 1000, "queryInlineRows": 50, "queryTimeoutSeconds": 30 }` | the settings; 400 with the reason when invalid |
+| PUT | `/settings` | `{ "allowedEmails": ["*@agentrq.com"], "queryMaxRows": 1000, "queryInlineRows": 25, "queryTimeoutSeconds": 30 }` | the settings; 400 with the reason when invalid |
 | DELETE | `/settings` | | the settings, back to the environment's (`source: "env"`) |
 | POST | `/settings/check-email` | `{ "email", "allowedEmails": [] }` | `{ "allowed", "matchedEntry"? }`, tested against the list sent, saved or not |
 

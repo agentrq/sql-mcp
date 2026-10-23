@@ -429,7 +429,7 @@ func TestMCPOAuthFlow(t *testing.T) {
 	call := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sql","arguments":{"action":"query","payload":{"sql":"select id from users"}}}}`
 	res = s.do(api, "POST", mcpURL, call, "Authorization", "Bearer "+access, "Content-Type", "application/json", "Accept", "application/json, text/event-stream", "Mcp-Protocol-Version", "2025-06-18")
 	require.Equal(t, http.StatusOK, res.status, res.body)
-	assert.Contains(t, res.body, `\"rowCount\":3`)
+	assert.Contains(t, res.body, `rowCount: 3`)
 
 	// Deleting the database revokes every grant.
 	require.Equal(t, http.StatusNoContent, s.do(c, "DELETE", "/api/v1/databases/"+id, nil).status)

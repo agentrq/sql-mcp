@@ -22,6 +22,7 @@ import (
 	"github.com/agentrq/sql-mcp/backend/internal/controller/crud"
 	"github.com/agentrq/sql-mcp/backend/internal/data/entity"
 	"github.com/agentrq/sql-mcp/backend/internal/data/model"
+	"github.com/agentrq/sql-mcp/backend/internal/service/toon"
 )
 
 // Backend is the part of the controller the tool calls.
@@ -61,7 +62,7 @@ const ToolDescription = "Read-only SQL on this database. Takes {action, payload}
 	"Actions: listTables (every table and view, and which columns are PII), " +
 	"describeTable {table, schema?} (columns and types), " +
 	"query {sql, store?} (one SELECT; PII columns, SELECT * over a table with PII, and writes are rejected), " +
-	"help {topic?}. Start with listTables."
+	"help {topic?}. Answers are TOON: a table names its columns once, then one line per row. Start with listTables."
 
 type input struct {
 	Action  string         `json:"action" jsonschema:"listTables, describeTable, query or help"`
@@ -73,7 +74,8 @@ func NewServer(backend Backend, caller Caller, version string) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "sql-mcp", Title: "SQL MCP: " + caller.DatabaseName, Version: version}, &mcp.ServerOptions{
 		Instructions: fmt.Sprintf("SQL MCP for the database %q. Use the `sql` tool: call listTables first, then query with explicit column lists. "+
 			"Columns marked PII cannot be selected, filtered, sorted or joined on; a query that touches one is rejected with the reason. "+
-			"Large results come back cut to a preview with a temporary tmphost.io URL holding every row.", caller.DatabaseName),
+			"Large results come back cut to a preview with a temporary tmphost.io URL holding every row. "+
+			"Answers are TOON: `key: value` lines, and tables as `name[rows]{col,col}:` followed by one comma-separated line per row.", caller.DatabaseName),
 	})
 	t := &tool{backend: backend, caller: caller}
 	mcp.AddTool(srv, &mcp.Tool{
@@ -106,11 +108,11 @@ type helpPayload struct {
 
 var help = map[string]string{
 	"":              "Usage: sql {\"action\": \"<action>\", \"payload\": {...}}\n\nActions:\n  listTables     Every table and view, with its PII columns.\n  describeTable  {\"table\": \"users\", \"schema\": \"public\"} columns, types and PII flags.\n  query          {\"sql\": \"select id from users limit 10\", \"store\": false} one read-only SELECT.\n  help           {\"topic\": \"<action>\"}",
-	"listTables":    "listTables takes no payload. It returns every table and view as schema.name, its kind, and the columns marked PII, which no query may read.",
-	"describeTable": "describeTable {\"table\": \"<name>\", \"schema\": \"<schema, optional>\"} returns each column's name, type and whether it is PII.",
+	"listTables":    "listTables takes no payload. It returns a tables table (schema.name, kind, column count) and a pii table of the columns no query may read.",
+	"describeTable": "describeTable {\"table\": \"<name>\", \"schema\": \"<schema, optional>\"} returns a columns table: each column's name, type and whether it is PII.",
 	"query": "query {\"sql\": \"<one SELECT>\", \"store\": <bool, optional>} runs the query read-only. Refused: any statement but SELECT, more than one statement, " +
 		"a PII column anywhere (select list, WHERE, JOIN, ORDER BY), SELECT * or t.* or whole-row references over a table with PII, and functions that run SQL from text. " +
-		"A preview of the first rows comes back inline; a larger result (or store: true) is stored whole as CSV on the owner's tmphost.io and its URL returned.",
+		"The first rows come back inline as a TOON rows table after rowCount and the other totals; a larger result (or store: true) is stored whole as CSV on the owner's tmphost.io and its URL returned.",
 }
 
 func (t *tool) handle(ctx context.Context, _ *mcp.CallToolRequest, in input) (*mcp.CallToolResult, any, error) {
@@ -153,23 +155,18 @@ func (t *tool) listTables(ctx context.Context) (*mcp.CallToolResult, any, error)
 	if err != nil {
 		return errorResult(err.Error()), nil, nil
 	}
-	type row struct {
-		Table      string   `json:"table"`
-		Kind       string   `json:"kind"`
-		Columns    int      `json:"columns"`
-		PIIColumns []string `json:"piiColumns,omitempty"`
-	}
-	out := make([]row, 0, len(tables))
+	list := toon.Table{Columns: []string{"table", "kind", "columns"}}
+	pii := toon.Table{Columns: []string{"table", "column"}}
 	for _, tb := range tables {
-		r := row{Table: tb.Schema + "." + tb.Name, Kind: tb.Kind, Columns: len(tb.Columns)}
+		name := tb.Schema + "." + tb.Name
+		list.Rows = append(list.Rows, []any{name, tb.Kind, len(tb.Columns)})
 		for _, c := range tb.Columns {
 			if c.PII {
-				r.PIIColumns = append(r.PIIColumns, c.Name)
+				pii.Rows = append(pii.Rows, []any{name, c.Name})
 			}
 		}
-		out = append(out, r)
 	}
-	return jsonResult(map[string]any{"tables": out})
+	return toonResult(toon.Object{{Key: "tables", Value: list}, {Key: "pii", Value: pii}})
 }
 
 func (t *tool) describeTable(ctx context.Context, p describePayload) (*mcp.CallToolResult, any, error) {
@@ -184,16 +181,13 @@ func (t *tool) describeTable(ctx context.Context, p describePayload) (*mcp.CallT
 		if !strings.EqualFold(tb.Name, p.Table) || (p.Schema != "" && !strings.EqualFold(tb.Schema, p.Schema)) {
 			continue
 		}
-		type col struct {
-			Name     string `json:"name"`
-			DataType string `json:"dataType"`
-			PII      bool   `json:"pii,omitempty"`
-		}
-		cols := make([]col, 0, len(tb.Columns))
+		cols := toon.Table{Columns: []string{"name", "type", "pii"}}
 		for _, c := range tb.Columns {
-			cols = append(cols, col{Name: c.Name, DataType: c.DataType, PII: c.PII})
+			cols.Rows = append(cols.Rows, []any{c.Name, c.DataType, c.PII})
 		}
-		return jsonResult(map[string]any{"table": tb.Schema + "." + tb.Name, "kind": tb.Kind, "columns": cols})
+		return toonResult(toon.Object{
+			{Key: "table", Value: tb.Schema + "." + tb.Name}, {Key: "kind", Value: tb.Kind}, {Key: "columns", Value: cols},
+		})
 	}
 	return errorResult("there is no table " + p.Table + "; listTables lists them"), nil, nil
 }
@@ -212,24 +206,22 @@ func (t *tool) query(ctx context.Context, p queryPayload) (*mcp.CallToolResult, 
 	case err != nil:
 		return errorResult("Query failed: " + err.Error()), nil, nil
 	}
-	out := map[string]any{
-		"columns":    res.Columns,
-		"rows":       res.Rows,
-		"rowCount":   res.RowCount,
-		"truncated":  res.Truncated,
-		"durationMs": res.DurationMs,
-	}
+	// The totals come first, so a reader knows what it is looking at before
+	// the rows.
+	out := toon.Object{{Key: "rowCount", Value: res.RowCount}}
 	if len(res.Rows) < res.RowCount {
-		out["rowsShown"] = len(res.Rows)
+		out = append(out, toon.Field{Key: "rowsShown", Value: len(res.Rows)})
 	}
+	out = append(out, toon.Field{Key: "truncated", Value: res.Truncated}, toon.Field{Key: "durationMs", Value: res.DurationMs})
 	if res.ResultURL != "" {
-		out["resultUrl"] = res.ResultURL
-		out["resultExpiresAt"] = res.ResultExpiresAt.Format(time.RFC3339)
+		out = append(out, toon.Field{Key: "resultUrl", Value: res.ResultURL},
+			toon.Field{Key: "resultExpiresAt", Value: res.ResultExpiresAt.Format(time.RFC3339)})
 	}
 	if res.StoreError != "" {
-		out["note"] = res.StoreError
+		out = append(out, toon.Field{Key: "note", Value: res.StoreError})
 	}
-	return jsonResult(out)
+	out = append(out, toon.Field{Key: "rows", Value: toon.Table{Columns: res.Columns, Rows: res.Rows}})
+	return toonResult(out)
 }
 
 func decode(payload map[string]any, out any) error {
@@ -250,15 +242,11 @@ func textResult(text string) *mcp.CallToolResult {
 }
 
 func errorResult(text string) *mcp.CallToolResult {
-	r := textResult(text)
+	r := textResult(toon.Marshal(toon.Object{{Key: "error", Value: text}}))
 	r.IsError = true
 	return r
 }
 
-func jsonResult(v any) (*mcp.CallToolResult, any, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return errorResult(err.Error()), nil, nil
-	}
-	return textResult(string(b)), nil, nil
+func toonResult(o toon.Object) (*mcp.CallToolResult, any, error) {
+	return textResult(toon.Marshal(o)), nil, nil
 }

@@ -2,7 +2,6 @@ package mcpserver_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -97,7 +96,7 @@ func TestHelpAndUnknown(t *testing.T) {
 	assert.True(t, isErr)
 	text, isErr = call(t, cs, "delete", nil)
 	assert.True(t, isErr)
-	assert.Contains(t, text, `unknown action "delete"`)
+	assert.Equal(t, `error: "unknown action \"delete\": use listTables, describeTable, query or help"`, text)
 }
 
 func TestListAndDescribe(t *testing.T) {
@@ -105,13 +104,17 @@ func TestListAndDescribe(t *testing.T) {
 	cs := session(t, b)
 	text, isErr := call(t, cs, "listTables", nil)
 	require.False(t, isErr)
-	assert.JSONEq(t, `{"tables":[{"table":"public.users","kind":"table","columns":2,"piiColumns":["email"]},{"table":"billing.users","kind":"view","columns":1}]}`, text)
+	assert.Equal(t, `tables[2]{table,kind,columns}:
+  public.users,table,2
+  billing.users,view,1
+pii[1]{table,column}:
+  public.users,email`, text)
 
 	text, isErr = call(t, cs, "describeTable", map[string]any{"table": "USERS", "schema": "billing"})
 	require.False(t, isErr)
-	assert.JSONEq(t, `{"table":"billing.users","kind":"view","columns":[{"name":"plan","dataType":"text"}]}`, text)
+	assert.Equal(t, "table: billing.users\nkind: view\ncolumns[1]{name,type,pii}:\n  plan,text,false", text)
 	text, _ = call(t, cs, "describeTable", map[string]any{"table": "users"})
-	assert.Contains(t, text, `"pii":true`)
+	assert.Contains(t, text, "  email,text,true")
 
 	for _, p := range []map[string]any{{}, {"table": "nope"}, {"table": 5}} {
 		_, isErr = call(t, cs, "describeTable", p)
@@ -121,7 +124,7 @@ func TestListAndDescribe(t *testing.T) {
 	b.schemaErr = errors.New("permission denied")
 	text, isErr = call(t, cs, "listTables", nil)
 	assert.True(t, isErr)
-	assert.Equal(t, "permission denied", text)
+	assert.Equal(t, "error: permission denied", text)
 	_, isErr = call(t, cs, "describeTable", map[string]any{"table": "users"})
 	assert.True(t, isErr)
 }
@@ -138,11 +141,11 @@ func TestQuery(t *testing.T) {
 	b.queryErr = &entity.RejectedError{Reason: "column users.email is PII"}
 	text, isErr := call(t, cs, "query", map[string]any{"sql": "select email from users"})
 	assert.True(t, isErr)
-	assert.Equal(t, "Query rejected: column users.email is PII", text)
+	assert.Equal(t, `error: "Query rejected: column users.email is PII"`, text)
 
 	b.queryErr = errors.New("timeout")
 	text, _ = call(t, cs, "query", map[string]any{"sql": "select 1"})
-	assert.Equal(t, "Query failed: timeout", text)
+	assert.Equal(t, `error: "Query failed: timeout"`, text)
 
 	b.queryErr = nil
 	b.result = &entity.QueryResult{
@@ -152,20 +155,24 @@ func TestQuery(t *testing.T) {
 	}
 	text, isErr = call(t, cs, "query", map[string]any{"sql": "select id from users", "store": true})
 	require.False(t, isErr)
-	assert.JSONEq(t, `{"columns":["id"],"rows":[[1]],"rowCount":3,"rowsShown":1,"truncated":false,"durationMs":4,
-		"resultUrl":"https://x.tmphost.io/r.csv","resultExpiresAt":"2030-01-01T00:00:00Z"}`, text)
+	assert.Equal(t, `rowCount: 3
+rowsShown: 1
+truncated: false
+durationMs: 4
+resultUrl: "https://x.tmphost.io/r.csv"
+resultExpiresAt: "2030-01-01T00:00:00Z"
+rows[1]{id}:
+  1`, text)
 	assert.Equal(t, crud.QueryRequest{UserID: 7, DatabaseID: 9, SQL: "select id from users", Source: model.SourceMCP, Store: true}, b.last)
 
-	b.result = &entity.QueryResult{Columns: []string{"id"}, Rows: [][]any{{1}}, RowCount: 1, StoreError: "tmphost is not connected"}
-	text, _ = call(t, cs, "query", map[string]any{"sql": "select id from users"})
-	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &out))
-	assert.Equal(t, "tmphost is not connected", out["note"])
-	assert.NotContains(t, out, "rowsShown")
-
-	b.result = &entity.QueryResult{Columns: []string{"f"}, Rows: [][]any{{func() {}}}, RowCount: 1}
-	_, isErr = call(t, cs, "query", map[string]any{"sql": "select f"})
-	assert.True(t, isErr, "an unencodable result is an error, not a crash")
+	b.result = &entity.QueryResult{Columns: []string{"id", "name"}, Rows: [][]any{{1, nil}}, RowCount: 1, StoreError: "tmphost is not connected"}
+	text, _ = call(t, cs, "query", map[string]any{"sql": "select id, name from users"})
+	assert.Equal(t, `rowCount: 1
+truncated: false
+durationMs: 0
+note: tmphost is not connected
+rows[1]{id,name}:
+  1,null`, text)
 }
 
 func TestHandlerNeedsACaller(t *testing.T) {
