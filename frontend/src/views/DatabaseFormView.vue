@@ -62,6 +62,7 @@
               {{ showDsn ? 'Hide' : 'Show' }}
             </button>
           </div>
+          <p :class="HINT" data-test="dsn-format">{{ dsnFormat }}</p>
           <p v-if="isEdit" :class="HINT" data-test="dsn-keep-hint">Leave blank to keep the current connection string.</p>
           <p v-else :class="HINT">Stored encrypted. Use a read-only database user where possible.</p>
 
@@ -101,7 +102,7 @@ import LoadingState from '../components/LoadingState.vue'
 import { createDatabase, deleteDatabase, fetchDatabase, fetchDrivers, testConnection, updateDatabase } from '../api'
 import { useToasts } from '../composables/useToasts'
 import { useDatabaseStore } from '../stores/databaseStore'
-import { DSN_PLACEHOLDERS, FALLBACK_DRIVERS } from '../utils/drivers'
+import { DSN_FORMATS, DSN_PLACEHOLDERS, FALLBACK_DRIVERS } from '../utils/drivers'
 import { BTN_DANGER, BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY, CARD, HINT, INPUT, LABEL, PAGE_TITLE } from '../ui'
 
 const route = useRoute()
@@ -126,6 +127,7 @@ const deleting = ref(false)
 
 const selectedDriverAvailable = computed(() => Boolean(drivers.value.find((d) => d.id === form.driver)?.available))
 const dsnPlaceholder = computed(() => DSN_PLACEHOLDERS[form.driver] || DSN_PLACEHOLDERS.postgres)
+const dsnFormat = computed(() => DSN_FORMATS[form.driver] || '')
 const canSave = computed(() => form.name.trim() !== '' && (isEdit.value || (form.dsn.trim() !== '' && selectedDriverAvailable.value)))
 
 // A test result describes the DSN it was run on; editing either invalidates it.

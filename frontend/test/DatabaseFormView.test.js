@@ -4,29 +4,53 @@ import { useDatabaseStore } from '../src/stores/databaseStore'
 import { useToasts } from '../src/composables/useToasts'
 import { flush, jsonResponse, mockFetch, mountAt } from './helpers'
 
-const DRIVERS = { drivers: [{ id: 'postgres', name: 'PostgreSQL', available: true }, { id: 'mysql', name: 'MySQL', available: false }] }
+const DRIVERS = { drivers: [{ id: 'postgres', name: 'PostgreSQL', available: true }, { id: 'mysql', name: 'MySQL', available: true }] }
 const DB = { id: 'd1', name: 'analytics', driver: 'postgres', dsnMasked: 'postgres://app:****@h/db', piiColumnCount: 0, mcpUrl: 'https://x/mcp/d1' }
 
 describe('DatabaseFormView', () => {
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ''; useToasts().toasts.value = [] })
 
-  it('offers PostgreSQL and disables MySQL with a Coming soon badge', async () => {
-    mockFetch({ 'GET /drivers': DRIVERS })
+  it('disables a driver that is not available yet, with a Coming soon badge', async () => {
+    mockFetch({ 'GET /drivers': { drivers: [...DRIVERS.drivers, { id: 'oracle', name: 'Oracle', available: false }] } })
     const { wrapper } = await mountAt(DatabaseFormView, { path: '/databases/new' })
     const pg = wrapper.find('[data-test="driver-postgres"]')
-    const my = wrapper.find('[data-test="driver-mysql"]')
+    const ora = wrapper.find('[data-test="driver-oracle"]')
     expect(pg.attributes('disabled')).toBeUndefined()
     expect(pg.attributes('aria-checked')).toBe('true')
-    expect(my.attributes('disabled')).toBeDefined()
-    expect(my.find('[data-test="coming-soon"]').text()).toBe('Coming soon')
-    await my.trigger('click')
+    expect(ora.attributes('disabled')).toBeDefined()
+    expect(ora.find('[data-test="coming-soon"]').text()).toBe('Coming soon')
+    await ora.trigger('click')
     expect(pg.attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('[data-test="dsn-format"]').text()).toContain('postgres://')
   })
 
   it('falls back to the built-in driver list', async () => {
     mockFetch({ 'GET /drivers': [500, {}] })
     const { wrapper } = await mountAt(DatabaseFormView, { path: '/databases/new' })
-    expect(wrapper.find('[data-test="driver-mysql"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="driver-postgres"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="driver-mysql"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('creates a MySQL database from its DSN', async () => {
+    const f = mockFetch({ 'GET /drivers': DRIVERS, 'POST /databases/test': { ok: true, serverVersion: 'MySQL 8.4.3' }, 'POST /databases': [201, { database: { ...DB, driver: 'mysql' } }] })
+    const { wrapper } = await mountAt(DatabaseFormView, { path: '/databases/new' })
+    const my = wrapper.find('[data-test="driver-mysql"]')
+    expect(my.find('[data-test="coming-soon"]').exists()).toBe(false)
+    await my.trigger('click')
+    expect(my.attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('#db-dsn').attributes('placeholder')).toBe('mysql://user:pass@host:3306/db?tls=true')
+    expect(wrapper.find('[data-test="dsn-format"]').text()).toContain('user:pass@tcp(host:3306)/db')
+
+    await wrapper.find('#db-name').setValue('shop')
+    await wrapper.find('#db-dsn').setValue('app:p@tcp(db:3306)/shop')
+    await wrapper.find('[data-test="test-connection"]').trigger('click')
+    await flush()
+    expect(wrapper.find('[data-test="test-ok"]').text()).toContain('MySQL 8.4.3')
+    expect(JSON.parse(f.mock.calls.at(-1)[1].body)).toEqual({ database: { driver: 'mysql', dsn: 'app:p@tcp(db:3306)/shop' } })
+
+    await wrapper.find('form').trigger('submit')
+    await flush(); await flush()
+    expect(JSON.parse(f.mock.calls.at(-1)[1].body)).toEqual({ database: { name: 'shop', driver: 'mysql', dsn: 'app:p@tcp(db:3306)/shop' } })
   })
 
   it('toggles DSN visibility and tests the connection', async () => {

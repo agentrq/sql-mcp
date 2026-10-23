@@ -22,11 +22,7 @@ const unreachableDSN = "postgres://u:p@127.0.0.1:1/db?sslmode=disable&connect_ti
 func newTestPostgres(t *testing.T) *postgresDriver {
 	t.Helper()
 	d := NewPostgres().(*postgresDriver)
-	t.Cleanup(func() {
-		for _, p := range d.pools {
-			p.pool.Close()
-		}
-	})
+	t.Cleanup(d.pools.closeAll)
 	return d
 }
 
@@ -53,17 +49,17 @@ func TestPoolCache(t *testing.T) {
 		_, err := d.pool(ctx, dsn(i))
 		require.NoError(t, err)
 	}
-	require.Len(t, d.pools, maxPools)
+	require.Len(t, d.pools.pools, maxPools)
 
 	// The least recently used pool makes room for a new one.
-	d.pools[poolKey(dsn(0))].used = time.Now() // touched last
-	d.pools[poolKey(dsn(5))].used = time.Now().Add(-time.Hour)
+	d.pools.pools[poolKey(dsn(0))].used = time.Now() // touched last
+	d.pools.pools[poolKey(dsn(5))].used = time.Now().Add(-time.Hour)
 	_, err = d.pool(ctx, dsn(maxPools))
 	require.NoError(t, err)
-	assert.Len(t, d.pools, maxPools)
-	assert.NotContains(t, d.pools, poolKey(dsn(5)))
-	assert.Contains(t, d.pools, poolKey(dsn(0)))
-	assert.Contains(t, d.pools, poolKey(dsn(maxPools)))
+	assert.Len(t, d.pools.pools, maxPools)
+	assert.NotContains(t, d.pools.pools, poolKey(dsn(5)))
+	assert.Contains(t, d.pools.pools, poolKey(dsn(0)))
+	assert.Contains(t, d.pools.pools, poolKey(dsn(maxPools)))
 
 	_, err = d.pool(ctx, "postgres://u@h:bad/db")
 	assert.EqualError(t, err, "the DSN is not a valid PostgreSQL connection string")
@@ -240,7 +236,7 @@ func TestPostgresPoolPerDSN(t *testing.T) {
 		// The pool names itself, whatever the DSN asked for.
 		assert.Equal(t, "sql-mcp", res.Rows[0][0])
 	}
-	assert.Len(t, d.pools, 2)
+	assert.Len(t, d.pools.pools, 2)
 }
 
 func TestPostgresReaderRole(t *testing.T) {

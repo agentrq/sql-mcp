@@ -42,6 +42,11 @@ app state). A handler never calls the repository directly.
   and functions are the database role's job (see the README).
 - **Postgres is parsed with `wasilibs/go-pgquery`** (libpg_query as WASM),
   not cgo `pg_query_go`. The build is `CGO_ENABLED=0`.
+- **MySQL is parsed with TiDB's parser, walked by reflection**
+  (`sqlguard/mysql.go`). Its `Accept` skips children (a SELECT list's `*`), so
+  don't switch to the visitor. The guard parses as the server reads only
+  because the driver forces `sql_mode` (no `ANSI_QUOTES`,
+  `NO_BACKSLASH_ESCAPES`) and `utf8mb4`; a DSN must never loosen those.
 - **OAuth registrations, consents and codes are signed tokens, not rows.**
   Deleting a database revokes its grants because every token is checked
   against the database's current owner.
@@ -66,8 +71,9 @@ app state). A handler never calls the repository directly.
 
 ## Working here
 
-- `make test` runs `go vet`, `go test` and vitest. The Postgres driver tests
-  need `SQLMCP_TEST_PG_DSN` (see the README) and are skipped without it.
+- `make test` runs `go vet`, `go test` and vitest. The driver tests need
+  `SQLMCP_TEST_PG_DSN`, `SQLMCP_TEST_MYSQL_DSN` and `SQLMCP_TEST_MARIADB_DSN`
+  (see the README) and are skipped without them.
 - Cover each change with tests on both sides. The target is 100% unit
   coverage of new lines. `internal/testutil` has a fake engine and a fake
   tmphost, and `internal/app/app_test.go` drives the whole stack over HTTP.

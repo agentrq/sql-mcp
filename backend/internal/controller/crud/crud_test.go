@@ -76,7 +76,7 @@ func TestDrivers(t *testing.T) {
 	require.Len(t, ds, 2)
 	assert.True(t, ds[0].Available)
 	assert.Equal(t, "mysql", ds[1].ID)
-	assert.False(t, ds[1].Available)
+	assert.True(t, ds[1].Available)
 }
 
 func TestDatabaseLifecycle(t *testing.T) {
@@ -85,13 +85,13 @@ func TestDatabaseLifecycle(t *testing.T) {
 	bob := signIn(t, env, "bob@example.com")
 
 	for name, tc := range map[string]struct{ name, driver, dsn, want string }{
-		"no name":      {"", "postgres", testutil.GoodDSN, "name is required"},
-		"long name":    {strings.Repeat("x", 81), "postgres", testutil.GoodDSN, "at most 80"},
-		"control char": {"a\u202eb", "postgres", testutil.GoodDSN, "control characters"},
-		"mysql":        {"m", "mysql", "x", "not available yet"},
-		"unknown":      {"m", "oracle", "x", "unknown database engine"},
-		"bad dsn":      {"m", "postgres", "mysql://x", "not a valid"},
-		"unreachable":  {"m", "postgres", "postgres://x", "connection refused"},
+		"no name":       {"", "postgres", testutil.GoodDSN, "name is required"},
+		"long name":     {strings.Repeat("x", 81), "postgres", testutil.GoodDSN, "at most 80"},
+		"control char":  {"a\u202eb", "postgres", testutil.GoodDSN, "control characters"},
+		"bad mysql dsn": {"m", "mysql", "x", "not a valid MySQL"},
+		"unknown":       {"m", "oracle", "x", "unknown database engine"},
+		"bad dsn":       {"m", "postgres", "mysql://x", "not a valid"},
+		"unreachable":   {"m", "postgres", "postgres://x", "connection refused"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := env.Ctrl.CreateDatabase(ctx, alice, tc.name, tc.driver, tc.dsn)

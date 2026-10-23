@@ -100,9 +100,16 @@ func TestHelpers(t *testing.T) {
 }
 
 func TestUnreadableColumnRef(t *testing.T) {
-	g := testGuard()
-	w := &walker{relations: []relation{{name: "users"}}, refs: [][]any{{}, {map[string]any{"A_Const": map[string]any{}}}}}
-	err := g.checkRefs(w)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot read")
+	w := &walker{}
+	w.addRef(map[string]any{"fields": []any{}})
+	assert.Empty(t, w.refs)
+	w.addRef(map[string]any{"fields": []any{map[string]any{"A_Const": map[string]any{}}}})
+	require.Error(t, w.err)
+	assert.Contains(t, w.err.Error(), "cannot read")
+}
+
+func TestPIIWithNoSchemaMatchesEverySchema(t *testing.T) {
+	pii := indexPII([]Column{{Table: "users", Column: "email"}}, "")
+	err := checkRefs(pii, []relation{{schema: "shop", name: "users"}}, []ref{{name: "email"}}, false)
+	assert.ErrorContains(t, err, "shop.users.email")
 }

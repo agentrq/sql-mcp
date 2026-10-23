@@ -4,9 +4,12 @@ package dbdriver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agentrq/sql-mcp/backend/internal/service/sqlguard"
@@ -53,6 +56,9 @@ type Driver interface {
 	// returning at most maxRows rows.
 	Query(ctx context.Context, dsn, sql string, maxRows int, timeout time.Duration) (*Result, error)
 	Guard(pii []sqlguard.Column) Checker
+	// DefaultSchema is the schema an unqualified table is in: where a PII
+	// column marked with no schema lives.
+	DefaultSchema(dsn string) string
 }
 
 // ErrUnavailable is returned for an engine that is not supported yet.
@@ -93,26 +99,62 @@ func SuggestPII(column string) bool {
 	return piiNamePattern.MatchString(strings.TrimSpace(column))
 }
 
-// mysqlDriver is listed so the app can show it, but cannot be used yet.
-type mysqlDriver struct{}
+// maxPools caps how many databases keep a pool open at once; the oldest is
+// closed to make room.
+const maxPools = 32
 
-// NewMySQL is the not-yet-available MySQL engine.
-func NewMySQL() Driver { return mysqlDriver{} }
-
-func (mysqlDriver) ID() string                      { return "mysql" }
-func (mysqlDriver) Name() string                    { return "MySQL" }
-func (mysqlDriver) Available() bool                 { return false }
-func (mysqlDriver) ValidateDSN(string) error        { return ErrUnavailable }
-func (mysqlDriver) MaskDSN(dsn string) string       { return "" }
-func (mysqlDriver) Guard([]sqlguard.Column) Checker { return denyAll{} }
-func (mysqlDriver) Test(context.Context, string) (string, error) {
-	return "", ErrUnavailable
-}
-func (mysqlDriver) Schema(context.Context, string) ([]Table, error) { return nil, ErrUnavailable }
-func (mysqlDriver) Query(context.Context, string, string, int, time.Duration) (*Result, error) {
-	return nil, ErrUnavailable
+// poolCache keeps a connection pool per DSN, keyed by the DSN's hash so the
+// DSN itself is not held as a map key.
+type poolCache[P any] struct {
+	mu    sync.Mutex
+	pools map[string]*pooled[P]
+	close func(P)
 }
 
-type denyAll struct{}
+type pooled[P any] struct {
+	pool P
+	used time.Time
+}
 
-func (denyAll) Check(string) error { return ErrUnavailable }
+func newPoolCache[P any](closePool func(P)) *poolCache[P] {
+	return &poolCache[P]{pools: map[string]*pooled[P]{}, close: closePool}
+}
+
+// get returns dsn's pool, opening it when there is none.
+func (c *poolCache[P]) get(dsn string, open func() (P, error)) (P, error) {
+	sum := sha256.Sum256([]byte(dsn))
+	key := base64.RawStdEncoding.EncodeToString(sum[:])
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if p, ok := c.pools[key]; ok {
+		p.used = time.Now()
+		return p.pool, nil
+	}
+	pool, err := open()
+	if err != nil {
+		return pool, err
+	}
+	if len(c.pools) >= maxPools {
+		var oldest string
+		for k, p := range c.pools {
+			if oldest == "" || p.used.Before(c.pools[oldest].used) {
+				oldest = k
+			}
+		}
+		c.close(c.pools[oldest].pool)
+		delete(c.pools, oldest)
+	}
+	c.pools[key] = &pooled[P]{pool: pool, used: time.Now()}
+	return pool, nil
+}
+
+// closeAll closes every pool.
+func (c *poolCache[P]) closeAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, p := range c.pools {
+		c.close(p.pool)
+		delete(c.pools, k)
+	}
+}

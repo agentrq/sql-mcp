@@ -25,7 +25,8 @@ test: check-case test-backend test-frontend
 check-case:
 	@./scripts/check-case.sh
 
-# The Postgres driver's tests run when SQLMCP_TEST_PG_DSN names a database; see README.
+# The drivers' tests run when SQLMCP_TEST_PG_DSN, SQLMCP_TEST_MYSQL_DSN and
+# SQLMCP_TEST_MARIADB_DSN name databases; see README.
 test-backend:
 	@cd backend && go vet ./... && go test -cover ./...
 
@@ -34,7 +35,7 @@ test-frontend:
 
 # What CI enforces: the backend coverage floor (and, with BASE=<ref>, 100% of
 # lines added since it), then the frontend thresholds in vitest.config.js.
-# CI's floor (backend.yml) is higher because it runs the Postgres tests too.
+# CI's floor (backend.yml) is higher because it runs the drivers' tests too.
 COVER_MIN ?= 92.5
 cover:
 	@cd backend && go test -coverpkg=$$(go list ./... | grep -v -e /testutil -e /cmd/ | paste -sd, -) -coverprofile=coverage.out ./...

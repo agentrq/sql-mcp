@@ -356,10 +356,12 @@ func (c *Controller) ListPII(ctx context.Context, userID, id int64) ([]entity.PI
 // maxPIIColumns caps one database's PII set.
 const maxPIIColumns = 10000
 
-// SetPII replaces a database's PII columns.
+// SetPII replaces a database's PII columns. A column with no schema is in
+// the engine's default one: public, or the DSN's database on MySQL.
 func (c *Controller) SetPII(ctx context.Context, userID, id int64, columns []entity.PIIColumn) ([]entity.PIIColumn, error) {
-	if _, err := c.repo.GetDatabase(ctx, userID, id); err != nil {
-		return nil, mapErr(err)
+	_, d, dsn, err := c.open(ctx, userID, id)
+	if err != nil {
+		return nil, err
 	}
 	if len(columns) > maxPIIColumns {
 		return nil, entity.Invalid("too many PII columns")
@@ -369,7 +371,7 @@ func (c *Controller) SetPII(ctx context.Context, userID, id int64, columns []ent
 	for _, col := range columns {
 		schema := strings.TrimSpace(col.Schema)
 		if schema == "" {
-			schema = "public"
+			schema = d.DefaultSchema(dsn)
 		}
 		table, column := strings.TrimSpace(col.Table), strings.TrimSpace(col.Column)
 		if table == "" || column == "" {

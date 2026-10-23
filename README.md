@@ -16,7 +16,7 @@ a preview plus the URL.
 
 | | |
 |---|---|
-| Engines | PostgreSQL. MySQL is listed but not available yet. |
+| Engines | PostgreSQL, MySQL 8+ (MariaDB works too) |
 | Sign-in | Google, or a root token, restricted to `ALLOWED_EMAILS` |
 | MCP auth | OAuth 2.1 with PKCE (S256), RFC 7591 registration, RFC 8414/9728 discovery |
 | TLS | Let's Encrypt through Cloudflare DNS-01, on any port |
@@ -85,9 +85,18 @@ including the port, for example `https://sql.example.com:3443`.
 
 ## Connect an agent
 
-1. In the app, add a database: give it a name, choose PostgreSQL and enter the
+1. In the app, add a database: give it a name, choose the engine and enter the
    DSN. The connection is tested before it is saved. The DSN is encrypted
    (AES-256-GCM) and only ever shown masked.
+
+   | Engine | DSN |
+   |---|---|
+   | PostgreSQL | `postgres://user:pass@host:5432/db?sslmode=require`, or `host=h user=u dbname=db` |
+   | MySQL | `mysql://user:pass@host:3306/db?tls=true`, or the Go driver's form `user:pass@tcp(host:3306)/db?tls=true` |
+
+   A MySQL DSN takes the [driver's parameters](https://github.com/go-sql-driver/mysql#parameters).
+   Its database is where a table with no schema is looked up, and a PII
+   column marked with no schema lives there.
 2. On the **PII columns** tab, tick the columns to protect. Columns whose
    names look like PII (email, phone, ssn…) are suggested.
 3. On the **Connect** tab, copy the MCP URL (`<APP_BASE_URL>/mcp/<id>`) and
@@ -112,9 +121,10 @@ every query with whether it ran, was rejected or failed.
 
 ## What the PII guard does, and what it doesn't
 
-Each query is parsed with PostgreSQL's own parser
-([libpg_query](https://github.com/pganalyze/libpg_query), compiled to WASM)
-and refused when:
+Each query is parsed by a parser for its engine: PostgreSQL's own
+([libpg_query](https://github.com/pganalyze/libpg_query), compiled to WASM),
+or for MySQL [TiDB's](https://github.com/pingcap/tidb/tree/master/pkg/parser)
+(pure Go). It is refused when:
 
 - it is anything other than a single `SELECT`. That rules out writes,
   `SELECT … INTO`, `FOR UPDATE`, and a write hidden in a CTE.
@@ -125,9 +135,22 @@ and refused when:
 - it uses `*`, `t.*` or a whole-row reference such as `to_json(u)` on a table
   that has PII columns.
 - it calls a function that runs SQL from text or reads the server's files
-  (`query_to_xml`, `dblink`, `pg_read_file`, `lo_*`, `set_config`…).
+  (`query_to_xml`, `dblink`, `pg_read_file`, `lo_*`, `set_config`…; on
+  MySQL `LOAD_FILE`, `SLEEP`, `BENCHMARK`, `GET_LOCK`…).
+- on MySQL, it has an executable comment (`/*! … */`, `/*M! … */`): whether
+  the server runs it depends on its version, which the guard can't know.
 
-Queries run in a `READ ONLY` transaction with a statement timeout.
+Queries run in a `READ ONLY` transaction with a statement timeout
+(`max_execution_time` on MySQL, `max_statement_time` on MariaDB).
+
+MySQL connections are opened with what the guard relies on, whatever the DSN
+says: one statement per query, `utf8mb4`, and MySQL 8's default `sql_mode`.
+Without `ANSI_QUOTES`, `"email"` is a string as the guard reads it, and
+without `NO_BACKSLASH_ESCAPES` a `\'` can't end a string early.
+
+On MySQL, `READ ONLY` doesn't stop DDL: `CREATE`, `DROP` and the like commit
+the transaction first. The guard refuses them, but the user's grants are what
+stop them on the server.
 
 The guard only sees the query text. A **view** or a **user-defined function**
 that reads a PII column is invisible to it, so mark the view's columns as PII
@@ -143,6 +166,14 @@ GRANT SELECT ON public.orders, public.products TO sqlmcp;
 GRANT SELECT (id, created_at, country) ON public.users TO sqlmcp;
 ```
 
+On MySQL:
+
+```sql
+CREATE USER 'sqlmcp'@'%' IDENTIFIED BY '…';
+GRANT SELECT ON shop.orders TO 'sqlmcp'@'%';
+GRANT SELECT (id, created_at, country) ON shop.users TO 'sqlmcp'@'%';
+```
+
 ## Develop
 
 ```sh
@@ -151,20 +182,27 @@ make lint       # golangci-lint (backend/.golangci.yml) and ESLint
 make cover      # the coverage gates CI enforces; BASE=main also checks new lines
 ```
 
-The PostgreSQL driver's tests need a database seeded with
-`backend/internal/service/dbdriver/testdata/shop.sql`. Without one they are
-skipped:
+The drivers' tests need databases seeded from
+`backend/internal/service/dbdriver/testdata/`. Without them they are skipped:
 
 ```sh
 docker run -d --name sqlmcp-pg -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=shop -p 55432:5432 postgres:18
 docker exec -i sqlmcp-pg psql -U postgres -d shop -v ON_ERROR_STOP=1 -q < backend/internal/service/dbdriver/testdata/shop.sql
-SQLMCP_TEST_PG_DSN='postgres://postgres:secret@localhost:55432/shop?sslmode=disable' make test-backend
+docker run -d --name sqlmcp-mysql -e MYSQL_ROOT_PASSWORD=secret -p 53306:3306 mysql:8.4
+docker exec -i sqlmcp-mysql mysql -uroot -psecret < backend/internal/service/dbdriver/testdata/shop_mysql.sql
+docker run -d --name sqlmcp-mariadb -e MARIADB_ROOT_PASSWORD=secret -p 53307:3306 mariadb:11.4
+docker exec -i sqlmcp-mariadb mariadb -uroot -psecret < backend/internal/service/dbdriver/testdata/shop_mysql.sql
+SQLMCP_TEST_PG_DSN='postgres://postgres:secret@localhost:55432/shop?sslmode=disable' \
+SQLMCP_TEST_MYSQL_DSN='mysql://root:secret@127.0.0.1:53306/shop' \
+SQLMCP_TEST_MARIADB_DSN='mysql://root:secret@127.0.0.1:53307/shop' make test-backend
 ```
+
+(Wait for each server to accept connections before seeding it.)
 
 ### CI
 
-GitHub Actions run on every pull request: Backend (vet, race tests against a
-Postgres service, coverage), Frontend (vitest thresholds, build), Lint, a
+GitHub Actions run on every pull request: Backend (vet, race tests against
+Postgres, MySQL and MariaDB services, coverage), Frontend (vitest thresholds, build), Lint, a
 Docker build, and the case-collision check. Backend coverage may not fall below
 `COVER_MIN` in `.github/workflows/backend.yml` (95%; today 95.8%), and every Go line a pull
 request adds must be run by a test.

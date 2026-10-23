@@ -47,7 +47,7 @@ A database is one connection a person registered; it gets its own MCP server.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| GET | `/drivers` | | `{ "drivers": [{ "id": "postgres", "name": "PostgreSQL", "available": true }, { "id": "mysql", "name": "MySQL", "available": false }] }` |
+| GET | `/drivers` | | `{ "drivers": [{ "id": "postgres", "name": "PostgreSQL", "available": true }, { "id": "mysql", "name": "MySQL", "available": true }] }` |
 | GET | `/databases` | | `{ "databases": [Database] }` |
 | POST | `/databases` | `{ "database": { "name", "driver", "dsn" } }` | 201 `{ "database": Database }` (the DSN is tested before it is saved) |
 | POST | `/databases/test` | `{ "database": { "driver", "dsn" } }` | `{ "ok": true, "serverVersion": "PostgreSQL 17.2" }` or error |
@@ -56,7 +56,7 @@ A database is one connection a person registered; it gets its own MCP server.
 | DELETE | `/databases/:id` | | 204 |
 | GET | `/databases/:id/schema` | | `{ "tables": [{ "schema": "public", "name": "users", "columns": [{ "name": "email", "dataType": "text", "pii": true, "suggestedPii": true }] }] }` |
 | GET | `/databases/:id/pii` | | `{ "piiColumns": [{ "schema": "public", "table": "users", "column": "email" }] }` |
-| PUT | `/databases/:id/pii` | `{ "piiColumns": [PiiColumn] }` (replaces the whole set) | `{ "piiColumns": [PiiColumn] }` |
+| PUT | `/databases/:id/pii` | `{ "piiColumns": [PiiColumn] }` (replaces the whole set; an empty `schema` is the engine's default: `public`, or the DSN's database on MySQL) | `{ "piiColumns": [PiiColumn] }` |
 | POST | `/databases/:id/query` | `{ "sql": "select ..." }` | `{ "columns": ["id"], "rows": [[1]], "rowCount": 1, "truncated": false }`; a query touching a PII column is 422 with the reason |
 | GET | `/databases/:id/queries?limit=50` | | `{ "queries": [{ "id", "source": "mcp" \| "console", "sql", "status": "ok" \| "rejected" \| "error", "reason", "rowCount", "resultUrl", "durationMs", "createdAt" }] }` |
 | GET | `/databases/:id/queries/stream` | | `text/event-stream`: one `event: query` per query as it is recorded, `data` a query log entry as above and `id` its id; `: ping` comments every 25 s. 401 without a session, 404 for someone else's database |

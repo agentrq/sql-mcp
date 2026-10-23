@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { loginRedirect } from '../src/utils/loginRedirect'
 import { claudeCodeCommand, mcpJsonConfig, mcpServerName } from '../src/utils/mcpSnippets'
-import { driverName, DSN_PLACEHOLDERS, FALLBACK_DRIVERS } from '../src/utils/drivers'
+import { driverName, DSN_FORMATS, DSN_PLACEHOLDERS, FALLBACK_DRIVERS } from '../src/utils/drivers'
 
 const origin = 'https://sql.example.com'
 
@@ -38,7 +38,9 @@ describe('drivers', () => {
     expect(driverName('postgres')).toBe('PostgreSQL')
     expect(driverName('oracle')).toBe('oracle')
     expect(driverName(undefined)).toBe('')
-    expect(FALLBACK_DRIVERS.find((d) => d.id === 'mysql').available).toBe(false)
+    expect(FALLBACK_DRIVERS.find((d) => d.id === 'mysql').available).toBe(true)
     expect(DSN_PLACEHOLDERS.postgres).toContain('sslmode=require')
+    expect(DSN_PLACEHOLDERS.mysql).toMatch(/^mysql:\/\//)
+    expect(DSN_FORMATS.mysql).toContain('tcp(host:3306)')
   })
 })

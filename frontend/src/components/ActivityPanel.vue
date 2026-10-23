@@ -8,7 +8,7 @@ import { formatDateTime, formatDuration } from '../composables/useFormat'
 import { createQueryStream } from '../composables/useQueryStream'
 import { BTN_GHOST } from '../ui'
 
-const props = defineProps({ databaseId: { type: String, required: true } })
+const props = defineProps({ databaseId: { type: String, required: true }, driver: { type: String, default: '' } })
 
 /** How many queries the list keeps as live ones arrive. */
 const LIMIT = 50
@@ -129,6 +129,6 @@ onBeforeUnmount(stream.stop)
       </div>
     </div>
 
-    <QueryDetail v-if="selected" :key="selected.id" :query="selected" @close="selected = null" />
+    <QueryDetail v-if="selected" :key="selected.id" :query="selected" :driver="driver" @close="selected = null" />
   </div>
 </template>

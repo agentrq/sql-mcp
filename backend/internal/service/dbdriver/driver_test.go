@@ -1,7 +1,6 @@
 package dbdriver
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -59,23 +58,6 @@ func TestRegistry(t *testing.T) {
 	assert.EqualError(t, err, "unknown database engine")
 
 	assert.Empty(t, NewRegistry().All())
-}
-
-func TestMySQLIsUnavailable(t *testing.T) {
-	d := NewMySQL()
-	ctx := context.Background()
-	assert.Equal(t, "mysql", d.ID())
-	assert.Equal(t, "MySQL", d.Name())
-	assert.False(t, d.Available())
-	assert.ErrorIs(t, d.ValidateDSN("mysql://u:p@h/db"), ErrUnavailable)
-	assert.Empty(t, d.MaskDSN("mysql://u:p@h/db"))
-	_, err := d.Test(ctx, "dsn")
-	assert.ErrorIs(t, err, ErrUnavailable)
-	_, err = d.Schema(ctx, "dsn")
-	assert.ErrorIs(t, err, ErrUnavailable)
-	_, err = d.Query(ctx, "dsn", "select 1", 1, time.Second)
-	assert.ErrorIs(t, err, ErrUnavailable)
-	assert.ErrorIs(t, d.Guard(nil).Check("select 1"), ErrUnavailable)
 }
 
 type stringer struct{}

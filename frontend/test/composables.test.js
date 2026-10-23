@@ -76,6 +76,8 @@ describe('useFormat', () => {
   it('formats SQL for reading, leaving what it cannot parse alone', () => {
     expect(formatSql('select id, name from users u join orders o on o.user_id=u.id where u.id = $1'))
       .toBe('select\n  id,\n  name\nfrom\n  users u\n  join orders o on o.user_id = u.id\nwhere\n  u.id = $1')
+    expect(formatSql('select `id` from users where note = "a" limit 1', 'mysql'))
+      .toBe('select\n  `id`\nfrom\n  users\nwhere\n  note = "a"\nlimit\n  1')
     expect(formatSql('select (((')).toBe('select (((')
     expect(formatSql('')).toBe('')
     expect(formatSql(null)).toBe('')
@@ -97,6 +99,23 @@ describe('useFormat', () => {
       ['operator', '::'], ['keyword', 'text'], ['punctuation', ','],
       ['string', '$fn$ select 1 $fn$'],
     ])
+    // MySQL: # and "-- " comment, backquotes name, both quotes make strings
+    // with \ escapes, @ marks a variable, and -- with no space is two minuses.
+    const mysqlTokens = (sql) => {
+      const el = document.createElement('div')
+      el.innerHTML = highlightSql(sql, 'mysql')
+      return [...el.querySelectorAll('.token')].map((t) => [t.classList[1], t.textContent])
+    }
+    expect(mysqlTokens("select `Name`, @@version, \"it\\\"s\" from users where id = @id and note = 'a\\'b' # hi")).toEqual([
+      ['keyword', 'select'], ['identifier', '`Name`'], ['punctuation', ','], ['variable', '@@version'], ['punctuation', ','],
+      ['string', '"it\\"s"'], ['keyword', 'from'], ['keyword', 'where'], ['operator', '='], ['variable', '@id'],
+      ['word-operator', 'and'], ['operator', '='], ['string', "'a\\'b'"], ['comment', '# hi'],
+    ])
+    expect(mysqlTokens('select 1--1 -- note\n, 2')).toEqual([
+      ['keyword', 'select'], ['number', '1'], ['operator', '-'], ['operator', '-'], ['number', '1'], ['comment', '-- note'],
+      ['punctuation', ','], ['number', '2'],
+    ])
+    expect(highlightSql(null, 'mysql')).toBe('')
     expect(highlightSql('select \'<b>\'')).toBe('<span class="token keyword">select</span> <span class="token string">\'&lt;b>\'</span>')
     expect(highlightSql('')).toBe('')
     expect(highlightSql(null)).toBe('')

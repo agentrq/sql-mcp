@@ -2,7 +2,6 @@ package dbdriver
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -21,28 +19,20 @@ import (
 	"github.com/agentrq/sql-mcp/backend/internal/service/sqlguard"
 )
 
-// maxPools caps how many databases keep a pool open at once; the oldest is
-// closed to make room.
-const maxPools = 32
-
 type postgresDriver struct {
-	mu    sync.Mutex
-	pools map[string]*pooled
-}
-
-type pooled struct {
-	pool *pgxpool.Pool
-	used time.Time
+	pools *poolCache[*pgxpool.Pool]
 }
 
 // NewPostgres is the PostgreSQL engine.
 func NewPostgres() Driver {
-	return &postgresDriver{pools: map[string]*pooled{}}
+	return &postgresDriver{pools: newPoolCache((*pgxpool.Pool).Close)}
 }
 
 func (*postgresDriver) ID() string      { return "postgres" }
 func (*postgresDriver) Name() string    { return "PostgreSQL" }
 func (*postgresDriver) Available() bool { return true }
+
+func (*postgresDriver) DefaultSchema(string) string { return "public" }
 
 func (*postgresDriver) ValidateDSN(dsn string) error {
 	if strings.TrimSpace(dsn) == "" {
@@ -75,38 +65,16 @@ func (*postgresDriver) MaskDSN(dsn string) string {
 var kvPassword = regexp.MustCompile(`(?i)((?:^|\s)password\s*=\s*)('(?:\\.|[^'\\])*'?|\S*)`)
 
 func (d *postgresDriver) pool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
-	sum := sha256.Sum256([]byte(dsn))
-	key := base64.RawStdEncoding.EncodeToString(sum[:])
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if p, ok := d.pools[key]; ok {
-		p.used = time.Now()
-		return p.pool, nil
-	}
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		return nil, errors.New("the DSN is not a valid PostgreSQL connection string")
-	}
-	cfg.MaxConns = 4
-	cfg.MaxConnIdleTime = 5 * time.Minute
-	cfg.ConnConfig.RuntimeParams["application_name"] = "sql-mcp"
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	if len(d.pools) >= maxPools {
-		var oldest string
-		for k, p := range d.pools {
-			if oldest == "" || p.used.Before(d.pools[oldest].used) {
-				oldest = k
-			}
+	return d.pools.get(dsn, func() (*pgxpool.Pool, error) {
+		cfg, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			return nil, errors.New("the DSN is not a valid PostgreSQL connection string")
 		}
-		d.pools[oldest].pool.Close()
-		delete(d.pools, oldest)
-	}
-	d.pools[key] = &pooled{pool: pool, used: time.Now()}
-	return pool, nil
+		cfg.MaxConns = 4
+		cfg.MaxConnIdleTime = 5 * time.Minute
+		cfg.ConnConfig.RuntimeParams["application_name"] = "sql-mcp"
+		return pgxpool.NewWithConfig(ctx, cfg)
+	})
 }
 
 func (d *postgresDriver) Test(ctx context.Context, dsn string) (string, error) {

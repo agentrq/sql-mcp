@@ -8,13 +8,13 @@ import { highlightSql } from '../composables/useSqlHighlight'
 import { BTN_GHOST, SECTION_LABEL } from '../ui'
 import { STATUS_STYLES } from './queryStatus'
 
-const props = defineProps({ query: { type: Object, required: true } })
+const props = defineProps({ query: { type: Object, required: true }, driver: { type: String, default: '' } })
 const emit = defineEmits(['close'])
 
 /** Off shows the SQL exactly as it was logged. */
 const formatted = ref(true)
-const shownSql = computed(() => (formatted.value ? formatSql(props.query.sql) : props.query.sql))
-const highlighted = computed(() => highlightSql(shownSql.value))
+const shownSql = computed(() => (formatted.value ? formatSql(props.query.sql, props.driver) : props.query.sql))
+const highlighted = computed(() => highlightSql(shownSql.value, props.driver))
 
 const copy = () => copyToClipboard(shownSql.value, 'Query copied')
 

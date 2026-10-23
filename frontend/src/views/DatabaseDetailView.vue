@@ -44,7 +44,7 @@
         <ConnectPanel v-if="activeTab === 'connect'" :database="database" />
         <PiiEditor v-else-if="activeTab === 'pii'" :database-id="database.id" @saved="onPiiSaved" />
         <QueryConsole v-else-if="activeTab === 'query'" :database-id="database.id" />
-        <ActivityPanel v-else-if="activeTab === 'activity'" :database-id="database.id" />
+        <ActivityPanel v-else-if="activeTab === 'activity'" :database-id="database.id" :driver="database.driver" />
       </div>
     </template>
   </div>

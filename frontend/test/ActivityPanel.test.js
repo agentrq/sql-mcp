@@ -32,9 +32,9 @@ describe('ActivityPanel', () => {
     useToasts().toasts.value = []
   })
 
-  async function mountPanel(routes) {
+  async function mountPanel(routes, driver = 'postgres') {
     const f = mockFetch(routes)
-    const w = mount(ActivityPanel, { props: { databaseId: 'd1' }, attachTo: document.body })
+    const w = mount(ActivityPanel, { props: { databaseId: 'd1', driver }, attachTo: document.body })
     await flush(); await flush()
     return { w, f }
   }
@@ -137,6 +137,15 @@ describe('ActivityPanel', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('reads SQL the way MySQL does on a MySQL database', async () => {
+    const sql = 'select `id` from orders # newest'
+    const { w } = await mountPanel({ 'GET /databases/d1/queries?limit=50': { queries: [q('a', '2026-10-23T04:00:00Z', { sql })] } }, 'mysql')
+    await w.findAll('[data-test="query-row"]')[0].trigger('click')
+    expect(w.find('[data-test="detail-sql"] .token.identifier').text()).toBe('`id`')
+    expect(w.find('[data-test="detail-sql"] .token.comment').text()).toBe('# newest')
+    w.unmount()
   })
 
   it('shows a failed load', async () => {

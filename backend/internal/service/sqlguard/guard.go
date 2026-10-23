@@ -72,17 +72,23 @@ type Guard struct {
 
 // New is a guard for these PII columns.
 func New(columns []Column) *Guard {
-	g := &Guard{pii: map[string][]Column{}}
+	return &Guard{pii: indexPII(columns, "public")}
+}
+
+// indexPII maps each lower-case table name to its PII columns, giving a
+// column with no schema defaultSchema.
+func indexPII(columns []Column, defaultSchema string) map[string][]Column {
+	pii := map[string][]Column{}
 	for _, c := range columns {
 		c.Schema = strings.ToLower(c.Schema)
 		if c.Schema == "" {
-			c.Schema = "public"
+			c.Schema = defaultSchema
 		}
 		c.Table = strings.ToLower(c.Table)
 		c.Column = strings.ToLower(c.Column)
-		g.pii[c.Table] = append(g.pii[c.Table], c)
+		pii[c.Table] = append(pii[c.Table], c)
 	}
-	return g
+	return pii
 }
 
 // relation is a table the query reads, as the query named it.
@@ -92,12 +98,20 @@ type relation struct {
 	alias  string
 }
 
+// ref is a column reference: qualifier.name, or qualifier.* when star.
+type ref struct {
+	qualifier []string // lower case; empty when unqualified
+	name      string   // lower case; "" when star
+	star      bool
+}
+
 // piiColumns are the PII columns of rel, every schema's when the query did
 // not name one: the search_path decides which it reads, so all are assumed.
-func (g *Guard) piiColumns(rel relation) []Column {
+// A column marked with no schema matches every schema.
+func piiColumns(pii map[string][]Column, rel relation) []Column {
 	var out []Column
-	for _, c := range g.pii[rel.name] {
-		if rel.schema == "" || rel.schema == c.Schema {
+	for _, c := range pii[rel.name] {
+		if rel.schema == "" || c.Schema == "" || rel.schema == c.Schema {
 			out = append(out, c)
 		}
 	}
@@ -150,14 +164,14 @@ func (g *Guard) Check(sql string) error {
 	if w.err != nil {
 		return w.err
 	}
-	return g.checkRefs(w)
+	return checkRefs(g.pii, w.relations, w.refs, true)
 }
 
 // walker collects what the query reads, and stops at the first thing that
 // refuses it outright.
 type walker struct {
 	relations []relation
-	refs      [][]any // each ColumnRef's fields
+	refs      []ref
 	err       error
 }
 
@@ -183,10 +197,7 @@ func (w *walker) walk(node any) {
 			case "RangeVar":
 				w.addRelation(value)
 			case "ColumnRef":
-				if m, ok := value.(map[string]any); ok {
-					fields, _ := m["fields"].([]any)
-					w.refs = append(w.refs, fields)
-				}
+				w.addRef(value)
 			case "FuncCall":
 				if name := funcName(value); deniedFunction(name) {
 					w.err = reject("the function %s is not allowed", name)
@@ -211,6 +222,31 @@ func (w *walker) addRelation(value any) {
 		rel.alias = strings.ToLower(str(alias["aliasname"]))
 	}
 	w.relations = append(w.relations, rel)
+}
+
+// addRef records a ColumnRef: its fields are String nodes, the last of which
+// may be an A_Star.
+func (w *walker) addRef(value any) {
+	m, _ := value.(map[string]any)
+	fields, _ := m["fields"].([]any)
+	if len(fields) == 0 {
+		return
+	}
+	var r ref
+	for _, f := range fields[:len(fields)-1] {
+		s, _ := stringNode(f)
+		r.qualifier = append(r.qualifier, strings.ToLower(s))
+	}
+	last := fields[len(fields)-1]
+	if isStar(last) {
+		r.star = true
+	} else if name, ok := stringNode(last); ok {
+		r.name = strings.ToLower(name)
+	} else {
+		w.err = reject("the query has a column reference the guard cannot read")
+		return
+	}
+	w.refs = append(w.refs, r)
 }
 
 func funcName(value any) string {
@@ -259,11 +295,12 @@ func str(v any) string {
 }
 
 // checkRefs refuses a column reference that reads PII: the column itself,
-// a star over a table that has some, or the whole row of one.
-func (g *Guard) checkRefs(w *walker) error {
+// a star over a table that has some, or, when wholeRows, the whole row of one
+// (Postgres reads a bare table name or alias as its row).
+func checkRefs(pii map[string][]Column, relations []relation, refs []ref, wholeRows bool) error {
 	var piiRels []relation
-	for _, rel := range w.relations {
-		if len(g.piiColumns(rel)) > 0 {
+	for _, rel := range relations {
+		if len(piiColumns(pii, rel)) > 0 {
 			piiRels = append(piiRels, rel)
 		}
 	}
@@ -271,52 +308,39 @@ func (g *Guard) checkRefs(w *walker) error {
 		return nil
 	}
 
-	for _, fields := range w.refs {
-		if len(fields) == 0 {
-			continue
-		}
-		last := fields[len(fields)-1]
-		var qualifier []string
-		for _, f := range fields[:len(fields)-1] {
-			s, _ := stringNode(f)
-			qualifier = append(qualifier, strings.ToLower(s))
-		}
-		targets := resolve(piiRels, qualifier)
+	for _, r := range refs {
+		targets := resolve(piiRels, r.qualifier)
 
-		if isStar(last) {
-			if len(qualifier) == 0 {
+		if r.star {
+			if len(r.qualifier) == 0 {
 				return reject("SELECT * is not allowed on %s because it has PII columns; list the columns you need", label(piiRels[0]))
 			}
 			if len(targets) > 0 {
-				return reject("%s.* is not allowed because %s has PII columns; list the columns you need", strings.Join(qualifier, "."), label(targets[0]))
+				return reject("%s.* is not allowed because %s has PII columns; list the columns you need", strings.Join(r.qualifier, "."), label(targets[0]))
 			}
 			// A subquery or CTE alias: its own select list was checked.
 			continue
 		}
 
-		name, ok := stringNode(last)
-		if !ok {
-			return reject("the query has a column reference the guard cannot read")
-		}
-		name = strings.ToLower(name)
-
-		if len(qualifier) > 0 && len(targets) == 0 {
+		if len(r.qualifier) > 0 && len(targets) == 0 {
 			// Qualified by something that is not a PII table (a subquery or
 			// CTE alias): the name alone is compared, against every PII table.
 			targets = piiRels
 		}
-		if len(qualifier) == 0 {
-			// The whole row of a PII table: to_json(u), row_to_json(users).
-			for _, rel := range piiRels {
-				if name == rel.alias || (rel.alias == "" && name == rel.name) {
-					return reject("reading whole rows of %s is not allowed because it has PII columns", label(rel))
+		if len(r.qualifier) == 0 {
+			if wholeRows {
+				// The whole row of a PII table: to_json(u), row_to_json(users).
+				for _, rel := range piiRels {
+					if r.name == rel.alias || (rel.alias == "" && r.name == rel.name) {
+						return reject("reading whole rows of %s is not allowed because it has PII columns", label(rel))
+					}
 				}
 			}
 			targets = piiRels
 		}
 		for _, rel := range targets {
-			if hasColumn(g.piiColumns(rel), name) {
-				return reject("the column %s.%s is marked as PII and cannot be queried", label(rel), name)
+			if hasColumn(piiColumns(pii, rel), r.name) {
+				return reject("the column %s.%s is marked as PII and cannot be queried", label(rel), r.name)
 			}
 		}
 	}

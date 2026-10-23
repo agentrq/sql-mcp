@@ -37,9 +37,10 @@ type Driver struct {
 	SchemaErr error
 }
 
-func (*Driver) ID() string      { return "postgres" }
-func (*Driver) Name() string    { return "PostgreSQL" }
-func (*Driver) Available() bool { return true }
+func (*Driver) ID() string                  { return "postgres" }
+func (*Driver) Name() string                { return "PostgreSQL" }
+func (*Driver) Available() bool             { return true }
+func (*Driver) DefaultSchema(string) string { return "public" }
 func (*Driver) ValidateDSN(dsn string) error {
 	if !strings.HasPrefix(dsn, "postgres://") {
 		return errors.New("the DSN is not a valid PostgreSQL connection string")

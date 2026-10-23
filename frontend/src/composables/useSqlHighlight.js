@@ -18,10 +18,24 @@ const grammar = Prism.languages.extend('sql', {
   'word-operator': { pattern: /\b(?:AND|BETWEEN|ILIKE|IN|IS|LIKE|NOT|OR|SIMILAR TO)\b/i, alias: 'keyword' },
 })
 
+// MySQL reads it differently again: `#` starts a comment, a backquoted name
+// is an identifier, both quotes make strings and `\` escapes inside them,
+// and `@name` and `@@name` are variables.
+const mysqlGrammar = Prism.languages.extend('sql', {
+  comment: { pattern: /(^|[^\\])(?:\/\*[\s\S]*?\*\/|(?:--(?=\s)|#).*)/, lookbehind: true },
+  variable: /@@?[\w.$]+/,
+  string: { pattern: /'(?:\\[\s\S]|[^'\\]|'')*'|"(?:\\[\s\S]|[^"\\]|"")*"/, greedy: true },
+  identifier: { pattern: /`(?:[^`]|``)*`/, greedy: true },
+  operator: /:=|[-+*/=%^~]|&&?|\|\|?|!=?|<(?:=>?|<|>)?|>[>=]?/,
+  'word-operator': { pattern: /\b(?:AND|BETWEEN|DIV|IN|IS|LIKE|MOD|NOT|OR|REGEXP|RLIKE|XOR)\b/i, alias: 'keyword' },
+})
+
 /**
- * The SQL as HTML, each token wrapped in a `<span class="token …">`. Prism
+ * The SQL as HTML, each token wrapped in a `<span class="token …">`, read the
+ * way the driver's database reads it (Postgres unless it is `mysql`). Prism
  * escapes the text, so the result is safe for v-html.
  */
-export function highlightSql(sql) {
-  return Prism.highlight(sql ? String(sql) : '', grammar, 'pgsql')
+export function highlightSql(sql, driver) {
+  const text = sql ? String(sql) : ''
+  return driver === 'mysql' ? Prism.highlight(text, mysqlGrammar, 'mysql') : Prism.highlight(text, grammar, 'pgsql')
 }

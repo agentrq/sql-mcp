@@ -25,7 +25,7 @@
           <AppLogo class="w-6 h-6 text-gray-500 dark:text-zinc-400" />
         </div>
         <h3 class="text-sm font-bold text-gray-900 dark:text-zinc-100">No databases yet</h3>
-        <p class="text-xs text-gray-500 dark:text-zinc-400 mt-1 mb-6 max-w-sm">Register a PostgreSQL database to get an MCP server URL your agents can connect to.</p>
+        <p class="text-xs text-gray-500 dark:text-zinc-400 mt-1 mb-6 max-w-sm">Register a PostgreSQL or MySQL database to get an MCP server URL your agents can connect to.</p>
         <router-link to="/databases/new" :class="BTN_PRIMARY">New database</router-link>
       </div>
 
