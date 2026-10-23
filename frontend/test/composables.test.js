@@ -25,6 +25,13 @@ describe('useToasts', () => {
     vi.advanceTimersByTime(4001)
     expect(t.toasts.value.map((x) => x.message)).toEqual(['d'])
   })
+
+  it('gives toasts added in the same millisecond distinct ids', () => {
+    vi.useFakeTimers()
+    const t = useToasts()
+    const ids = Array.from({ length: 50 }, () => t.addToast('x', 'info', null, 0))
+    expect(new Set(ids).size).toBe(50)
+  })
 })
 
 describe('copyToClipboard', () => {

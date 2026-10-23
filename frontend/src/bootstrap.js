@@ -49,7 +49,7 @@ export const clickOutside = {
 export function createAuthGuard(loadUser, hrefOf = (to) => to.fullPath) {
   return async function authGuard(to) {
     if (to.meta?.public) return true
-    let user = null
+    let user
     try {
       user = await loadUser()
     } catch {
@@ -70,7 +70,7 @@ export function createAuthGuard(loadUser, hrefOf = (to) => to.fullPath) {
 export function createAdminGuard(loadSession) {
   return async function adminGuard(to) {
     if (!to.meta?.admin || to.meta?.public) return true
-    let session = null
+    let session
     try {
       session = await loadSession()
     } catch {

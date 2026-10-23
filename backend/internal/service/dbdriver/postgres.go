@@ -179,7 +179,8 @@ func (d *postgresDriver) Query(ctx context.Context, dsn, sql string, maxRows int
 	if err != nil {
 		return nil, fmt.Errorf("could not start a read-only transaction: %w", err)
 	}
-	defer tx.Rollback(context.Background())
+	// Read-only, so rolling back is how every transaction ends.
+	defer func() { _ = tx.Rollback(context.Background()) }()
 	if _, err := tx.Exec(ctx, "select set_config('statement_timeout', $1, true)", strconv.FormatInt(timeout.Milliseconds(), 10)); err != nil {
 		return nil, err
 	}

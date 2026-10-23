@@ -64,5 +64,9 @@ app state). A handler never calls the repository directly.
 - Cover each change with tests on both sides. The target is 100% unit
   coverage of new lines. `internal/testutil` has a fake engine and a fake
   tmphost, and `internal/app/app_test.go` drives the whole stack over HTTP.
-- On this project's dev machine, Go needs `export GOPATH=$HOME/go` because
-  GOROOT is `~/go`.
+- CI (`.github/workflows`) fails a PR on any added Go line no test runs
+  (`scripts/coverage.sh`), on a backend total below `COVER_MIN`, and on any
+  golangci-lint or ESLint finding, warnings included. Run `make lint` and
+  `make cover BASE=main` before pushing. Raise `COVER_MIN`, never lower it.
+- On this project's dev machine Go is `/usr/local/go/bin`, not on `PATH`;
+  `golangci-lint` is in `~/go/bin`.

@@ -296,7 +296,7 @@ func TestTmphostSettings(t *testing.T) {
 	require.Equal(t, http.StatusFound, res.status)
 	u, _ := url.Parse(res.header.Get("Location"))
 	assert.Equal(t, s.tmphost.URL+"/oauth2/authorize", u.Scheme+"://"+u.Host+u.Path)
-	state := u.Query().Get("state")
+	assert.NotEmpty(t, u.Query().Get("state"))
 
 	res = s.do(c, "GET", "/api/v1/settings/tmphost/callback?state=wrong&code=good-code", nil)
 	assert.Contains(t, res.header.Get("Location"), "&tmphost=error")
@@ -304,7 +304,7 @@ func TestTmphostSettings(t *testing.T) {
 	// The flow cookie was spent by the failed attempt; start over.
 	res = s.do(c, "GET", "/api/v1/settings/tmphost/connect", nil)
 	u, _ = url.Parse(res.header.Get("Location"))
-	state = u.Query().Get("state")
+	state := u.Query().Get("state")
 	res = s.do(c, "GET", "/api/v1/settings/tmphost/callback?state="+url.QueryEscape(state)+"&code=good-code", nil)
 	assert.Equal(t, "/settings?tmphost=connected", res.header.Get("Location"))
 

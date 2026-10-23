@@ -1,6 +1,10 @@
 import { ref } from 'vue'
 
 const toasts = ref([])
+// A counter, not Date.now() + Math.random(): at today's timestamps a double
+// keeps only ~4096 distinct fractions per millisecond, so two toasts could
+// share an id and one dismissal would remove both.
+let lastId = 0
 
 const DURATION = 4000
 const ERROR_DURATION = 10000
@@ -13,7 +17,7 @@ export function useToasts() {
 
   const addToast = (message, type = 'info', title = null, duration = null) => {
     if (duration === null) duration = type === 'error' ? ERROR_DURATION : DURATION
-    const id = Date.now() + Math.random()
+    const id = ++lastId
     toasts.value = [...toasts.value, { id, message, type, title, duration, persistent: duration <= 0 }].slice(-MAX_VISIBLE)
     if (duration > 0) setTimeout(() => removeToast(id), duration)
     return id

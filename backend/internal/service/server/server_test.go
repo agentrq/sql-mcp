@@ -314,8 +314,14 @@ func TestRunHTTPS(t *testing.T) {
 	s := New(Config{SSLEnabled: true, Domain: domain, SSLCacheDir: filepath.Join(t.TempDir(), "certs")}, http.NotFoundHandler())
 	s.obtainer = &fakeObtainer{t: t}
 	done := run(s)
+	// The certificate is obtained in its own goroutine, so wait for it under
+	// the lock rather than racing it.
+	assert.Eventually(t, func() bool {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.usable(s.cert)
+	}, 5*time.Second, 10*time.Millisecond, "the managed certificate was obtained")
 	shutdownWhenUp(t, s, done)
-	assert.True(t, s.usable(s.cert), "the managed certificate was obtained")
 }
 
 func TestRunHTTPSUsesCertificateOnDisk(t *testing.T) {

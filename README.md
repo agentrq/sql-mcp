@@ -147,14 +147,32 @@ GRANT SELECT (id, created_at, country) ON public.users TO sqlmcp;
 
 ```sh
 make test       # go vet + go test, and vitest
+make lint       # golangci-lint (backend/.golangci.yml) and ESLint
+make cover      # the coverage gates CI enforces; BASE=main also checks new lines
 ```
 
-The PostgreSQL driver's tests need a database. Without one they are skipped:
+The PostgreSQL driver's tests need a database seeded with
+`backend/internal/service/dbdriver/testdata/shop.sql`. Without one they are
+skipped:
 
 ```sh
 docker run -d --name sqlmcp-pg -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=shop -p 55432:5432 postgres:18
+docker exec -i sqlmcp-pg psql -U postgres -d shop -v ON_ERROR_STOP=1 -q < backend/internal/service/dbdriver/testdata/shop.sql
 SQLMCP_TEST_PG_DSN='postgres://postgres:secret@localhost:55432/shop?sslmode=disable' make test-backend
 ```
+
+### CI
+
+GitHub Actions run on every pull request: Backend (vet, race tests against a
+Postgres service, coverage), Frontend (vitest thresholds, build), Lint, a
+Docker build, and the case-collision check. Backend coverage may not fall below
+`COVER_MIN` in `.github/workflows/backend.yml` (95%; today 95.8%), and every Go line a pull
+request adds must be run by a test.
+
+A push to `main` publishes `<user>/sql-mcp:latest` and `:<sha>` to Docker Hub
+for `linux/amd64` and `linux/arm64`; a `v*` tag publishes `:<version>` and
+`:<major>.<minor>`. Both need the repository secrets `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` (a Docker Hub access token with write scope).
 
 The REST API is documented in [`docs/API.md`](docs/API.md). Read
 [`AGENTS.md`](AGENTS.md) before changing code.

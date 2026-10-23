@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend build test test-backend test-frontend check-case fmt stop
+.PHONY: dev backend frontend build test test-backend test-frontend check-case cover lint fmt stop
 
 # The backend, then the Vite dev server on :5173 once the backend is up.
 # A missing backend/.env is created with development secrets (scripts/dev-env.sh).
@@ -31,6 +31,19 @@ test-backend:
 
 test-frontend:
 	@cd frontend && npm test
+
+# What CI enforces: the backend coverage floor (and, with BASE=<ref>, 100% of
+# lines added since it), then the frontend thresholds in vitest.config.js.
+# CI's floor (backend.yml) is higher because it runs the Postgres tests too.
+COVER_MIN ?= 92.5
+cover:
+	@cd backend && go test -coverpkg=$$(go list ./... | grep -v -e /testutil -e /cmd/ | paste -sd, -) -coverprofile=coverage.out ./...
+	@./scripts/coverage.sh backend/coverage.out $(COVER_MIN) $(BASE)
+	@cd frontend && npm run test:coverage
+
+lint:
+	@cd backend && golangci-lint run ./...
+	@cd frontend && npm run lint
 
 fmt:
 	@cd backend && gofmt -w .
