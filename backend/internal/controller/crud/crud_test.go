@@ -85,7 +85,7 @@ func TestDatabaseLifecycle(t *testing.T) {
 	for name, tc := range map[string]struct{ name, driver, dsn, want string }{
 		"no name":      {"", "postgres", testutil.GoodDSN, "name is required"},
 		"long name":    {strings.Repeat("x", 81), "postgres", testutil.GoodDSN, "at most 80"},
-		"control char": {"a‮b", "postgres", testutil.GoodDSN, "control characters"},
+		"control char": {"a\u202eb", "postgres", testutil.GoodDSN, "control characters"},
 		"mysql":        {"m", "mysql", "x", "not available yet"},
 		"unknown":      {"m", "oracle", "x", "unknown database engine"},
 		"bad dsn":      {"m", "postgres", "mysql://x", "not a valid"},

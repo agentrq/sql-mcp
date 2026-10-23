@@ -1,0 +1,13 @@
+# Local state that must not reach the build: secrets, dependencies the image
+# installs itself, and build output it rebuilds.
+.git
+.claude
+.mcp.json
+**/.env
+backend/_data
+backend/public
+backend/bin
+backend/coverage.out
+frontend/node_modules
+frontend/dist
+frontend/coverage

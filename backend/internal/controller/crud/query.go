@@ -69,10 +69,10 @@ func (c *Controller) RunQuery(ctx context.Context, rq QueryRequest) (*entity.Que
 	}
 	if rq.Source == model.SourceMCP && (rq.Store || len(res.Rows) > setup.QueryInlineRows) {
 		url, expiresAt, err := c.storeResult(ctx, rq.UserID, row.Name, res.Columns, res.Rows)
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			out.ResultURL, out.ResultExpiresAt = url, expiresAt
-		case err == errTmphostNotConnected:
+		case errTmphostNotConnected:
 			out.StoreError = "tmphost is not connected; connect it in SQL MCP settings to receive every row"
 		default:
 			log.Warn().Err(err).Msg("could not store a query result on tmphost")

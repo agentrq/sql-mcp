@@ -1,0 +1,94 @@
+name: Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'scripts/coverage.sh'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'scripts/coverage.sh'
+      - '.github/workflows/backend.yml'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # The total may not drop below this. Raise it as coverage grows; new lines
+  # are held to 100% on pull requests regardless.
+  COVER_MIN: '95'
+
+jobs:
+  test:
+    name: Test and build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    # The Postgres driver's tests are skipped without a database; CI runs them.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: shop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The base branch's history, to find the lines a pull request adds.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Tracks the toolchain the module declares rather than a second copy
+          # of the version that would quietly drift from it.
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Seed the test database
+        # The driver's tests count the rows this fixture inserts.
+        run: psql "$SQLMCP_TEST_PG_DSN" -v ON_ERROR_STOP=1 -q -f internal/service/dbdriver/testdata/shop.sql
+        env:
+          SQLMCP_TEST_PG_DSN: postgres://postgres:secret@localhost:5432/shop?sslmode=disable
+        working-directory: backend
+
+      - name: Vet
+        run: go vet ./...
+        working-directory: backend
+
+      - name: Build
+        # As the Dockerfile builds it: Postgres is parsed by WASM, not cgo.
+        run: CGO_ENABLED=0 go build ./...
+        working-directory: backend
+
+      - name: Test with coverage
+        # -coverpkg credits a handler with the lines the app's HTTP tests run
+        # through it. testutil is test support and cmd/server only wires main.
+        env:
+          SQLMCP_TEST_PG_DSN: postgres://postgres:secret@localhost:5432/shop?sslmode=disable
+        run: |
+          pkgs=$(go list ./... | grep -v -e /testutil -e /cmd/ | paste -sd, -)
+          go test -race -coverpkg="$pkgs" -coverprofile=coverage.out ./...
+        working-directory: backend
+
+      - name: Enforce coverage
+        run: |
+          base=
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            base=origin/${{ github.base_ref }}
+          fi
+          ./scripts/coverage.sh backend/coverage.out "$COVER_MIN" $base
+          echo "Backend coverage: $(cd backend && go tool cover -func=coverage.out | tail -1 | awk '{ print $NF }')" >> "$GITHUB_STEP_SUMMARY"

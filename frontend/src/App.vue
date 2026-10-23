@@ -153,7 +153,7 @@
          class="fixed z-[100] px-3 py-1.5 text-xs font-semibold text-black dark:text-white bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-md shadow-lg pointer-events-none whitespace-pre"
          :style="tooltipStore.style">{{ tooltipStore.text }}</div>
 
-    <Toast />
+    <ToastStack />
   </div>
 </template>
 
@@ -163,7 +163,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { pageKey } from './bootstrap'
 import AppLogo from './components/AppLogo.vue'
 import SidebarDatabases from './components/SidebarDatabases.vue'
-import Toast from './components/Toast.vue'
+import ToastStack from './components/ToastStack.vue'
 import { useAdminStore } from './stores/adminStore'
 import { useAuthStore } from './stores/authStore'
 import { useDatabaseStore } from './stores/databaseStore'
