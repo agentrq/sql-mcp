@@ -44,7 +44,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	assert.Equal(t, "./public", cfg.PublicDir)
 	assert.Equal(t, "https://app.tmphost.io", cfg.TmphostAPIURL)
 	assert.Equal(t, 1000, cfg.QueryMaxRows)
-	assert.Equal(t, 50, cfg.QueryInlineRows)
+	assert.Equal(t, 25, cfg.QueryInlineRows)
 	assert.Equal(t, 30*time.Second, cfg.QueryTimeout)
 	assert.Len(t, cfg.EncryptionKey, 32)
 	assert.False(t, cfg.CookieSecure())

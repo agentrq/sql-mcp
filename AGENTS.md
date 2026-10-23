@@ -50,6 +50,9 @@ app state). A handler never calls the repository directly.
 - **OAuth registrations, consents and codes are signed tokens, not rows.**
   Deleting a database revokes its grants because every token is checked
   against the database's current owner.
+- **The MCP tool answers in TOON, not JSON** (`service/toon`, hand-written,
+  no dependency), to spend fewer tokens. A new action builds a `toon.Object`;
+  only `help` is prose.
 - **Streams go on the stdlib mux, not Fiber** (`handler/live`). The Fiber
   adaptor buffers the whole response, so an SSE route on Fiber sends nothing
   until it ends. The live query feed (`service/feed`) is in-process only.

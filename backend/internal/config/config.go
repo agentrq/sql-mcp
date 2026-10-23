@@ -98,7 +98,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		PublicDir:          e.str("PUBLIC_DIR", "./public"),
 		TmphostAPIURL:      strings.TrimRight(e.str("TMPHOST_API_URL", "https://app.tmphost.io"), "/"),
 		QueryMaxRows:       e.int("QUERY_MAX_ROWS", 1000),
-		QueryInlineRows:    e.int("QUERY_INLINE_ROWS", 50),
+		QueryInlineRows:    e.int("QUERY_INLINE_ROWS", 25),
 		QueryTimeout:       e.duration("QUERY_TIMEOUT", 30*time.Second),
 	}
 	if e.err != nil {
