@@ -48,6 +48,10 @@ app state). A handler never calls the repository directly.
 - **Streams go on the stdlib mux, not Fiber** (`handler/live`). The Fiber
   adaptor buffers the whole response, so an SSE route on Fiber sends nothing
   until it ends. The live query feed (`service/feed`) is in-process only.
+- **The image is `FROM scratch`.** It has only what the Dockerfile copies
+  in: the binary, the web app, CA certs, `/etc/passwd` and `/data`. A new
+  runtime need (`/tmp`, tzdata) must be copied too, or it fails only in Docker.
+  It runs as UID 65532 so volumes chowned for the old distroless image work.
 - **Vite builds with `base: ''`.** The server rewrites `./` to `/` in
   `index.html` (`app.spa`). Without that rewrite, a hard reload on a nested
   route such as `/databases/x` serves a blank page.
