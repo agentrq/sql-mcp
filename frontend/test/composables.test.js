@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useToasts } from '../src/composables/useToasts'
 import { copyToClipboard } from '../src/composables/useClipboard'
 import { formatCell, formatDateTime, formatDuration, formatFullDateTime, toKebabCase } from '../src/composables/useFormat'
+import { formatSql } from '../src/composables/useSqlFormat'
 import { useQueryConsole } from '../src/composables/useQueryConsole'
 import { ApiError } from '../src/api'
 
@@ -70,6 +71,13 @@ describe('useFormat', () => {
     expect(formatCell({ a: 1 })).toBe('{"a":1}')
     expect(formatCell(3)).toBe('3')
     expect(formatCell(false)).toBe('false')
+  })
+  it('formats SQL for reading, leaving what it cannot parse alone', () => {
+    expect(formatSql('select id, name from users u join orders o on o.user_id=u.id where u.id = $1'))
+      .toBe('select\n  id,\n  name\nfrom\n  users u\n  join orders o on o.user_id = u.id\nwhere\n  u.id = $1')
+    expect(formatSql('select (((')).toBe('select (((')
+    expect(formatSql('')).toBe('')
+    expect(formatSql(null)).toBe('')
   })
 })
 
