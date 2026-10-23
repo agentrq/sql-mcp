@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { copyToClipboard } from '../composables/useClipboard'
 import { formatDuration, formatFullDateTime } from '../composables/useFormat'
 import { formatSql } from '../composables/useSqlFormat'
+import { highlightSql } from '../composables/useSqlHighlight'
 import { BTN_GHOST, SECTION_LABEL } from '../ui'
 import { STATUS_STYLES } from './queryStatus'
 
@@ -13,6 +14,7 @@ const emit = defineEmits(['close'])
 /** Off shows the SQL exactly as it was logged. */
 const formatted = ref(true)
 const shownSql = computed(() => (formatted.value ? formatSql(props.query.sql) : props.query.sql))
+const highlighted = computed(() => highlightSql(shownSql.value))
 
 const copy = () => copyToClipboard(shownSql.value, 'Query copied')
 
@@ -76,8 +78,34 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <button type="button" :class="BTN_GHOST" data-test="copy-sql" @click="copy">Copy</button>
           </div>
         </div>
-        <pre data-test="detail-sql" class="p-3 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-800/50 text-[12px] font-mono text-gray-800 dark:text-zinc-200 whitespace-pre-wrap break-words">{{ shownSql }}</pre>
+        <!-- highlightSql escapes the query text; only its own spans are markup. -->
+        <pre data-test="detail-sql" class="sql-code p-3 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-800/50 text-[12px] font-mono text-gray-800 dark:text-zinc-200 whitespace-pre-wrap break-words" v-html="highlighted" />
       </div>
     </div>
   </aside>
 </template>
+
+<style>
+/* Token colours for highlightSql: Tailwind's 700 shades in light mode, 400 in dark. */
+.sql-code .token.keyword { color: #6d28d9; font-weight: 600; }
+.sql-code .token.function { color: #0369a1; }
+.sql-code .token.string { color: #047857; }
+.sql-code .token.number,
+.sql-code .token.boolean { color: #b45309; }
+.sql-code .token.variable { color: #be185d; }
+.sql-code .token.identifier { color: #1d4ed8; }
+.sql-code .token.operator,
+.sql-code .token.punctuation { color: #6b7280; }
+.sql-code .token.comment { color: #9ca3af; font-style: italic; }
+
+.dark .sql-code .token.keyword { color: #a78bfa; }
+.dark .sql-code .token.function { color: #38bdf8; }
+.dark .sql-code .token.string { color: #34d399; }
+.dark .sql-code .token.number,
+.dark .sql-code .token.boolean { color: #fbbf24; }
+.dark .sql-code .token.variable { color: #f472b6; }
+.dark .sql-code .token.identifier { color: #60a5fa; }
+.dark .sql-code .token.operator,
+.dark .sql-code .token.punctuation { color: #a1a1aa; }
+.dark .sql-code .token.comment { color: #71717a; }
+</style>

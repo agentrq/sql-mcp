@@ -79,6 +79,8 @@ describe('ActivityPanel', () => {
 
     await w.findAll('[data-test="query-row"]')[0].trigger('click')
     expect(w.find('[data-test="detail-sql"]').text()).toBe(`select\n${'  col,\n'.repeat(200)}  id\nfrom\n  orders\nwhere\n  note = 'x'`)
+    expect(w.find('[data-test="detail-sql"] .token.keyword').text()).toBe('select')
+    expect(w.find('[data-test="detail-sql"] .token.string').text()).toBe("'x'")
     expect(w.find('[data-test="detail-rows"]').text()).toBe('3')
     expect(w.find('[data-test="detail-result"]').attributes('href')).toBe('https://tmphost.io/r/1')
     expect(w.findAll('[data-test="query-row"]')[0].attributes('aria-selected')).toBe('true')
