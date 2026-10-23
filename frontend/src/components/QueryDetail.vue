@@ -1,15 +1,20 @@
 <!-- One logged query in full: the right-hand sidebar of the Activity tab. -->
 <script setup>
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { copyToClipboard } from '../composables/useClipboard'
 import { formatDuration, formatFullDateTime } from '../composables/useFormat'
+import { formatSql } from '../composables/useSqlFormat'
 import { BTN_GHOST, SECTION_LABEL } from '../ui'
 import { STATUS_STYLES } from './queryStatus'
 
 const props = defineProps({ query: { type: Object, required: true } })
 const emit = defineEmits(['close'])
 
-const copy = () => copyToClipboard(props.query.sql, 'Query copied')
+/** Off shows the SQL exactly as it was logged. */
+const formatted = ref(true)
+const shownSql = computed(() => (formatted.value ? formatSql(props.query.sql) : props.query.sql))
+
+const copy = () => copyToClipboard(shownSql.value, 'Query copied')
 
 function onKeydown(e) {
   if (e.key === 'Escape') emit('close')
@@ -66,9 +71,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <div>
         <div class="flex items-center justify-between mb-1.5">
           <span :class="SECTION_LABEL">SQL</span>
-          <button type="button" :class="BTN_GHOST" data-test="copy-sql" @click="copy">Copy</button>
+          <div class="flex items-center gap-1">
+            <button type="button" :class="BTN_GHOST" data-test="toggle-format" @click="formatted = !formatted">{{ formatted ? 'Raw' : 'Formatted' }}</button>
+            <button type="button" :class="BTN_GHOST" data-test="copy-sql" @click="copy">Copy</button>
+          </div>
         </div>
-        <pre data-test="detail-sql" class="p-3 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-800/50 text-[12px] font-mono text-gray-800 dark:text-zinc-200 whitespace-pre-wrap break-words">{{ query.sql }}</pre>
+        <pre data-test="detail-sql" class="p-3 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-800/50 text-[12px] font-mono text-gray-800 dark:text-zinc-200 whitespace-pre-wrap break-words">{{ shownSql }}</pre>
       </div>
     </div>
   </aside>
