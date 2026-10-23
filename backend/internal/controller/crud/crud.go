@@ -18,6 +18,7 @@ import (
 	"github.com/agentrq/sql-mcp/backend/internal/repository"
 	"github.com/agentrq/sql-mcp/backend/internal/service/auth"
 	"github.com/agentrq/sql-mcp/backend/internal/service/dbdriver"
+	"github.com/agentrq/sql-mcp/backend/internal/service/feed"
 	"github.com/agentrq/sql-mcp/backend/internal/service/security"
 	"github.com/agentrq/sql-mcp/backend/internal/service/tmphost"
 )
@@ -50,6 +51,7 @@ type Controller struct {
 	tmphost      *tmphost.Client
 	cfg          Config
 	current      atomic.Pointer[live]
+	queries      *feed.Hub[entity.QueryLog] // recorded queries, keyed by database ID
 	now          func() time.Time
 }
 
@@ -63,6 +65,7 @@ func New(p Params) *Controller {
 		envAllowlist: p.Allowlist,
 		tmphost:      p.Tmphost,
 		cfg:          p.Config,
+		queries:      feed.New[entity.QueryLog](),
 		now:          time.Now,
 	}
 	c.current.Store(c.envSetup())
@@ -271,7 +274,12 @@ func (c *Controller) UpdateDatabase(ctx context.Context, userID, id int64, name,
 
 // DeleteDatabase removes a database; its MCP tokens stop working with it.
 func (c *Controller) DeleteDatabase(ctx context.Context, userID, id int64) error {
-	return mapErr(c.repo.DeleteDatabase(ctx, userID, id))
+	if err := c.repo.DeleteDatabase(ctx, userID, id); err != nil {
+		return mapErr(err)
+	}
+	// Whoever is watching its activity loses access with the database.
+	c.queries.Close(id)
+	return nil
 }
 
 // open returns a person's database with its engine and opened DSN.

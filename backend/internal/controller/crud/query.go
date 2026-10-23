@@ -88,12 +88,15 @@ func (c *Controller) RunQuery(ctx context.Context, rq QueryRequest) (*entity.Que
 	return out, nil
 }
 
-// record writes the query log. A failure to log does not fail the query the
-// person already has, so it is only reported.
+// record writes the query log and tells whoever watches the database. A
+// failure to log does not fail the query the person already has, so it is
+// only reported.
 func (c *Controller) record(ctx context.Context, q *model.QueryLog) {
 	if err := c.repo.AddQueryLog(context.WithoutCancel(ctx), q); err != nil {
 		log.Error().Err(err).Msg("could not record a query")
+		return
 	}
+	c.queries.Publish(q.DatabaseID, queryLogEntity(q))
 }
 
 func truncate(s string, n int) string {
@@ -116,13 +119,28 @@ func (c *Controller) ListQueries(ctx context.Context, userID, id int64, limit in
 		return nil, err
 	}
 	out := make([]entity.QueryLog, 0, len(rows))
-	for _, q := range rows {
-		out = append(out, entity.QueryLog{
-			ID: FormatID(q.ID), Source: q.Source, SQL: q.SQL, Status: q.Status, Reason: q.Reason,
-			RowCount: q.RowCount, ResultURL: q.ResultURL, DurationMs: q.DurationMs, CreatedAt: q.CreatedAt,
-		})
+	for i := range rows {
+		out = append(out, queryLogEntity(&rows[i]))
 	}
 	return out, nil
+}
+
+// WatchQueries streams a database's queries as they are recorded. The
+// channel is closed when stop is called or the database is deleted; a
+// watcher that falls behind misses queries rather than slowing them down.
+func (c *Controller) WatchQueries(ctx context.Context, userID, id int64) (queries <-chan entity.QueryLog, stop func(), err error) {
+	if _, err := c.repo.GetDatabase(ctx, userID, id); err != nil {
+		return nil, nil, mapErr(err)
+	}
+	queries, stop = c.queries.Subscribe(id, 64)
+	return queries, stop, nil
+}
+
+func queryLogEntity(q *model.QueryLog) entity.QueryLog {
+	return entity.QueryLog{
+		ID: FormatID(q.ID), Source: q.Source, SQL: q.SQL, Status: q.Status, Reason: q.Reason,
+		RowCount: q.RowCount, ResultURL: q.ResultURL, DurationMs: q.DurationMs, CreatedAt: q.CreatedAt,
+	}
 }
 
 // SystemDatabaseOwner returns who owns a database and its name, for the MCP

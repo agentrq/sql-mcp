@@ -221,12 +221,16 @@ func FromQueryResult(r *entity.QueryResult) QueryResponse {
 func FromQueryLogs(in []entity.QueryLog) QueryLogsResponse {
 	out := QueryLogsResponse{Queries: []QueryLog{}}
 	for _, q := range in {
-		out.Queries = append(out.Queries, QueryLog{
-			ID: q.ID, Source: q.Source, SQL: q.SQL, Status: q.Status, Reason: q.Reason,
-			RowCount: q.RowCount, ResultURL: q.ResultURL, DurationMs: q.DurationMs, CreatedAt: q.CreatedAt,
-		})
+		out.Queries = append(out.Queries, FromQueryLog(q))
 	}
 	return out
+}
+
+func FromQueryLog(q entity.QueryLog) QueryLog {
+	return QueryLog{
+		ID: q.ID, Source: q.Source, SQL: q.SQL, Status: q.Status, Reason: q.Reason,
+		RowCount: q.RowCount, ResultURL: q.ResultURL, DurationMs: q.DurationMs, CreatedAt: q.CreatedAt,
+	}
 }
 
 func FromTmphostStatus(s *entity.TmphostStatus) TmphostStatus {

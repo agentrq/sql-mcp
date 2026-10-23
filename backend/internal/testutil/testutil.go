@@ -165,6 +165,7 @@ type Env struct {
 	Tokens  *auth.TokenService
 	Sealer  *security.Sealer
 	BaseURL string
+	DBPath  string // the app database, a SQLite file
 }
 
 // Key is the fixed 32-byte encryption key tests use.
@@ -178,7 +179,8 @@ func New(t *testing.T) *Env {
 	t.Helper()
 	var next atomic.Int64
 	next.Store(1_000_000)
-	repo, err := repository.Open("sqlite", filepath.Join(t.TempDir(), "app.db"), func() int64 { return next.Add(1) << 22 })
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+	repo, err := repository.Open("sqlite", dbPath, func() int64 { return next.Add(1) << 22 })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,5 +195,5 @@ func New(t *testing.T) *Env {
 		Tmphost: tmphost.New(th.URL, th.Client()),
 		Config:  crud.Config{BaseURL: baseURL, MaxRows: 100, InlineRows: 5, QueryTimeout: time.Second},
 	})
-	return &Env{Ctrl: ctrl, Repo: repo, Driver: d, Tmphost: th, Tokens: tokens, Sealer: sealer, BaseURL: baseURL}
+	return &Env{Ctrl: ctrl, Repo: repo, Driver: d, Tmphost: th, Tokens: tokens, Sealer: sealer, BaseURL: baseURL, DBPath: dbPath}
 }

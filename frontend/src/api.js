@@ -183,6 +183,16 @@ export async function fetchQueries(id, limit = 50) {
   return data?.queries || []
 }
 
+/** The server-sent events stream of a database's queries, one `query` event each. */
+export function queryStreamUrl(id) {
+  return `${apiBase()}/databases/${enc(id)}/queries/stream`
+}
+
+/** Swaps the refresh cookie for a new session; rejects when it cannot. */
+export function refreshSession() {
+  return request('/auth/refresh', { method: 'POST' })
+}
+
 // --- Settings ---------------------------------------------------------------
 
 /** `{ connected, account?, serverUrl, connectedAt? }` */

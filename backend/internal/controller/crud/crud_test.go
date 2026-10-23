@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/agentrq/sql-mcp/backend/internal/controller/crud"
 	"github.com/agentrq/sql-mcp/backend/internal/data/entity"
@@ -388,4 +390,48 @@ func TestToCSV(t *testing.T) {
 	out, err = crud.ToCSV([]string{"f"}, [][]any{{func() {}}})
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "0x")
+}
+
+func TestWatchQueries(t *testing.T) {
+	env := testutil.New(t)
+	alice := signIn(t, env, "alice@example.com")
+	bob := signIn(t, env, "bob@example.com")
+	id := newDB(t, env, alice)
+
+	_, _, err := env.Ctrl.WatchQueries(ctx, bob, id)
+	assert.ErrorIs(t, err, entity.ErrNotFound)
+
+	queries, stop, err := env.Ctrl.WatchQueries(ctx, alice, id)
+	require.NoError(t, err)
+	_, err = env.Ctrl.RunQuery(ctx, crud.QueryRequest{UserID: alice, DatabaseID: id, SQL: "select id from users", Source: model.SourceMCP})
+	require.NoError(t, err)
+	q := <-queries
+	logs, err := env.Ctrl.ListQueries(ctx, alice, id, 1)
+	require.NoError(t, err)
+	assert.Equal(t, logs[0].ID, q.ID, "a watcher sees what the log lists")
+	assert.True(t, logs[0].CreatedAt.Equal(q.CreatedAt))
+	assert.Equal(t, "select id from users", q.SQL)
+	assert.Equal(t, model.QueryOK, q.Status)
+
+	require.NoError(t, env.Ctrl.DeleteDatabase(ctx, alice, id))
+	_, open := <-queries
+	assert.False(t, open, "deleting the database ends the watch")
+	stop()
+}
+
+func TestAQueryThatCannotBeLoggedIsNotWatched(t *testing.T) {
+	env := testutil.New(t)
+	alice := signIn(t, env, "alice@example.com")
+	id := newDB(t, env, alice)
+	queries, stop, err := env.Ctrl.WatchQueries(ctx, alice, id)
+	require.NoError(t, err)
+	defer stop()
+
+	db, err := gorm.Open(sqlite.Open(env.DBPath), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("DROP TABLE query_logs").Error)
+
+	_, err = env.Ctrl.RunQuery(ctx, crud.QueryRequest{UserID: alice, DatabaseID: id, SQL: "select id from users", Source: model.SourceConsole})
+	require.NoError(t, err, "a failure to log does not fail the query")
+	assert.Empty(t, queries)
 }
