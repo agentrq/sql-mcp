@@ -3,6 +3,7 @@ import { useToasts } from '../src/composables/useToasts'
 import { copyToClipboard } from '../src/composables/useClipboard'
 import { formatCell, formatDateTime, formatDuration, formatFullDateTime, toKebabCase } from '../src/composables/useFormat'
 import { formatSql } from '../src/composables/useSqlFormat'
+import { highlightSql } from '../src/composables/useSqlHighlight'
 import { useQueryConsole } from '../src/composables/useQueryConsole'
 import { ApiError } from '../src/api'
 
@@ -78,6 +79,27 @@ describe('useFormat', () => {
     expect(formatSql('select (((')).toBe('select (((')
     expect(formatSql('')).toBe('')
     expect(formatSql(null)).toBe('')
+  })
+  it('highlights SQL as escaped HTML, reading it the way Postgres does', () => {
+    const tokens = (sql) => {
+      const el = document.createElement('div')
+      el.innerHTML = highlightSql(sql)
+      return [...el.querySelectorAll('.token')].map((t) => [t.classList[1], t.textContent])
+    }
+    expect(tokens(`select count(*), "Name" from users where id = $1 and note = 'it''s' -- hi`)).toEqual([
+      ['keyword', 'select'], ['function', 'count'], ['punctuation', '('], ['operator', '*'], ['punctuation', ')'],
+      ['punctuation', ','], ['identifier', '"Name"'], ['keyword', 'from'], ['keyword', 'where'], ['operator', '='],
+      ['variable', '$1'], ['word-operator', 'and'], ['operator', '='], ['string', "'it''s'"], ['comment', '-- hi'],
+    ])
+    // #> is a JSON operator, not a comment; a dollar-quoted body is one string.
+    expect(tokens("select doc #> '{a}', id::text, $fn$ select 1 $fn$")).toEqual([
+      ['keyword', 'select'], ['operator', '#'], ['operator', '>'], ['string', "'{a}'"], ['punctuation', ','],
+      ['operator', '::'], ['keyword', 'text'], ['punctuation', ','],
+      ['string', '$fn$ select 1 $fn$'],
+    ])
+    expect(highlightSql('select \'<b>\'')).toBe('<span class="token keyword">select</span> <span class="token string">\'&lt;b>\'</span>')
+    expect(highlightSql('')).toBe('')
+    expect(highlightSql(null)).toBe('')
   })
 })
 
