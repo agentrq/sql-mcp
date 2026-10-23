@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useToasts } from '../src/composables/useToasts'
 import { copyToClipboard } from '../src/composables/useClipboard'
-import { formatCell, formatDateTime, formatDuration, toKebabCase } from '../src/composables/useFormat'
+import { formatCell, formatDateTime, formatDuration, formatFullDateTime, toKebabCase } from '../src/composables/useFormat'
 import { useQueryConsole } from '../src/composables/useQueryConsole'
 import { ApiError } from '../src/api'
 
@@ -58,6 +58,9 @@ describe('useFormat', () => {
     expect(formatDateTime('')).toBe('')
     expect(formatDateTime('nope')).toBe('nope')
     expect(formatDateTime('2026-01-02T03:04:05Z')).toMatch(/2026/)
+    expect(formatFullDateTime('')).toBe('')
+    expect(formatFullDateTime('nope')).toBe('nope')
+    expect(formatFullDateTime('2026-01-02T03:04:05Z')).toMatch(/05/)
     expect(formatDuration(null)).toBe('')
     expect(formatDuration('x')).toBe('')
     expect(formatDuration(12.4)).toBe('12 ms')

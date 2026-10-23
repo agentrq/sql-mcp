@@ -45,6 +45,9 @@ app state). A handler never calls the repository directly.
 - **OAuth registrations, consents and codes are signed tokens, not rows.**
   Deleting a database revokes its grants because every token is checked
   against the database's current owner.
+- **Streams go on the stdlib mux, not Fiber** (`handler/live`). The Fiber
+  adaptor buffers the whole response, so an SSE route on Fiber sends nothing
+  until it ends. The live query feed (`service/feed`) is in-process only.
 - **Vite builds with `base: ''`.** The server rewrites `./` to `/` in
   `index.html` (`app.spa`). Without that rewrite, a hard reload on a nested
   route such as `/databases/x` serves a blank page.

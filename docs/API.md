@@ -59,6 +59,15 @@ A database is one connection a person registered; it gets its own MCP server.
 | PUT | `/databases/:id/pii` | `{ "piiColumns": [PiiColumn] }` (replaces the whole set) | `{ "piiColumns": [PiiColumn] }` |
 | POST | `/databases/:id/query` | `{ "sql": "select ..." }` | `{ "columns": ["id"], "rows": [[1]], "rowCount": 1, "truncated": false }`; a query touching a PII column is 422 with the reason |
 | GET | `/databases/:id/queries?limit=50` | | `{ "queries": [{ "id", "source": "mcp" \| "console", "sql", "status": "ok" \| "rejected" \| "error", "reason", "rowCount", "resultUrl", "durationMs", "createdAt" }] }` |
+| GET | `/databases/:id/queries/stream` | | `text/event-stream`: one `event: query` per query as it is recorded, `data` a query log entry as above and `id` its id; `: ping` comments every 25 s. 401 without a session, 404 for someone else's database |
+
+The query stream ends when the session's `at` cookie expires or the database
+is deleted; reconnecting then is refused, so the browser renews the session
+(`POST /auth/refresh`) and opens it again. A slow reader misses queries
+rather than holding them up, and each (re)connect should reload
+`/queries` to catch up. It is served by the standard mux, not Fiber (whose
+adaptor buffers the whole response), and only by the process that ran the
+query: run one replica, or the stream shows only that replica's queries.
 
 ## Settings
 

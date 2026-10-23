@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -622,4 +623,36 @@ func TestNewRefusesAnUnreadableSavedConfiguration(t *testing.T) {
 	require.NoError(t, repo.SetSetting(context.Background(), "configuration.json", "garbage"))
 	_, err = app.New(cfg, app.Deps{})
 	assert.ErrorContains(t, err, "ENCRYPTION_KEY")
+}
+
+func TestQueryStream(t *testing.T) {
+	s := newStack(t)
+	c := s.rootSession()
+	db := "/api/v1/databases/" + s.createDB(c)
+	assert.Equal(t, http.StatusNotFound, s.do(s.googleSession("bob@example.com"), "GET", db+"/queries/stream", nil).status)
+	assert.Equal(t, http.StatusUnauthorized, s.do(s.browser(), "GET", db+"/queries/stream", nil).status)
+
+	res, err := c.Get(s.srv.URL + db + "/queries/stream")
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "text/event-stream", res.Header.Get("Content-Type"))
+	r := bufio.NewReader(res.Body)
+	line, err := r.ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, ": connected\n", line, "the stream is flushed, not buffered by Fiber")
+
+	s.do(c, "POST", db+"/query", map[string]string{"sql": "select id from users"})
+	var event strings.Builder
+	for !strings.Contains(event.String(), "data: ") {
+		line, err = r.ReadString('\n')
+		require.NoError(t, err)
+		event.WriteString(line)
+	}
+	assert.Contains(t, event.String(), "event: query\n")
+	assert.Contains(t, event.String(), `"sql":"select id from users"`)
+
+	assert.Equal(t, http.StatusNoContent, s.do(c, "DELETE", db, nil).status)
+	_, err = io.ReadAll(r)
+	assert.NoError(t, err, "deleting the database ends the stream")
 }

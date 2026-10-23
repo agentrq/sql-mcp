@@ -128,6 +128,15 @@ describe('api', () => {
     expect(await api.fetchQueries('a')).toEqual([])
   })
 
+  it('points the query stream at the database and renews the session', async () => {
+    expect(api.queryStreamUrl('a/b')).toBe('/api/v1/databases/a%2Fb/queries/stream')
+    const f = mockFetch({ 'POST /auth/refresh': { status: 'ok' } })
+    await api.refreshSession()
+    expect(f.mock.calls[0][1].method).toBe('POST')
+    mockFetch({})
+    await expect(api.refreshSession()).rejects.toBeInstanceOf(api.ApiError)
+  })
+
   it('escapes ids in paths', async () => {
     const f = mockFetch({})
     await api.fetchDatabase('a/b').catch(() => {})
