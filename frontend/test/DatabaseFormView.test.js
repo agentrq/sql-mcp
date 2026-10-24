@@ -58,14 +58,32 @@ describe('DatabaseFormView', () => {
     expect(JSON.parse(f.mock.calls.at(-1)[1].body)).toEqual({ database: { name: 'shop', driver: 'mysql', dsn: 'app:p@tcp(db:3306)/shop' } })
   })
 
+  it('keeps browsers and password managers from filling the form', async () => {
+    mockFetch({ 'GET /drivers': DRIVERS })
+    const { wrapper } = await mountAt(DatabaseFormView, { path: '/databases/new' })
+    expect(wrapper.find('form').attributes('autocomplete')).toBe('off')
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    for (const id of ['#db-name', '#db-dsn']) {
+      const input = wrapper.find(id)
+      expect(input.attributes('autocomplete')).toBe('off')
+      expect(input.attributes('data-1p-ignore')).toBeDefined()
+      expect(input.attributes('data-lpignore')).toBe('true')
+      expect(input.attributes('data-bwignore')).toBeDefined()
+      expect(input.attributes('data-form-type')).toBe('other')
+    }
+  })
+
   it('toggles DSN visibility and tests the connection', async () => {
     const f = mockFetch({ 'GET /drivers': DRIVERS, 'POST /databases/test': { ok: true, serverVersion: 'PostgreSQL 17.2' } })
     const { wrapper } = await mountAt(DatabaseFormView, { path: '/databases/new' })
     const dsn = wrapper.find('#db-dsn')
-    expect(dsn.attributes('type')).toBe('password')
+    expect(dsn.attributes('type')).toBe('text')
+    expect(dsn.attributes('data-masked')).toBe('true')
+    expect(dsn.classes()).toContain('[-webkit-text-security:disc]')
     expect(dsn.attributes('placeholder')).toBe('postgres://user:pass@host:5432/db?sslmode=require')
     await wrapper.find('[data-test="toggle-dsn"]').trigger('click')
-    expect(dsn.attributes('type')).toBe('text')
+    expect(dsn.attributes('data-masked')).toBe('false')
+    expect(dsn.classes()).not.toContain('[-webkit-text-security:disc]')
     expect(wrapper.find('[data-test="test-connection"]').attributes('disabled')).toBeDefined()
     await dsn.setValue('postgres://u:p@h/db')
     await wrapper.find('[data-test="test-connection"]').trigger('click')
