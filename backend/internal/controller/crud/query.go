@@ -143,14 +143,21 @@ func queryLogEntity(q *model.QueryLog) entity.QueryLog {
 	}
 }
 
-// SystemDatabaseOwner returns who owns a database and its name, for the MCP
-// server to check a token against before anything else.
-func (c *Controller) SystemDatabaseOwner(ctx context.Context, id int64) (ownerID int64, name string, err error) {
+// DatabaseOwner is who owns a database, its name and its engine.
+type DatabaseOwner struct {
+	UserID int64
+	Name   string
+	Driver string
+}
+
+// SystemDatabaseOwner returns who owns a database, for the MCP server to
+// check a token against before anything else.
+func (c *Controller) SystemDatabaseOwner(ctx context.Context, id int64) (DatabaseOwner, error) {
 	row, err := c.repo.SystemGetDatabase(ctx, id)
 	if err != nil {
-		return 0, "", mapErr(err)
+		return DatabaseOwner{}, mapErr(err)
 	}
-	return row.UserID, row.Name, nil
+	return DatabaseOwner{UserID: row.UserID, Name: row.Name, Driver: row.Driver}, nil
 }
 
 // ToCSV writes a result as CSV, the header first.

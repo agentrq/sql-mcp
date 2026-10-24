@@ -426,6 +426,7 @@ func TestMCPOAuthFlow(t *testing.T) {
 	res = s.do(api, "POST", mcpURL, initBody, "Authorization", "Bearer "+access, "Content-Type", "application/json", "Accept", "application/json, text/event-stream")
 	require.Equal(t, http.StatusOK, res.status, res.body)
 	assert.Contains(t, res.body, "SQL MCP: shop")
+	assert.Contains(t, res.body, "The engine is PostgreSQL", "the instructions name the database's engine")
 	call := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sql","arguments":{"action":"query","payload":{"sql":"select id from users"}}}}`
 	res = s.do(api, "POST", mcpURL, call, "Authorization", "Bearer "+access, "Content-Type", "application/json", "Accept", "application/json, text/event-stream", "Mcp-Protocol-Version", "2025-06-18")
 	require.Equal(t, http.StatusOK, res.status, res.body)

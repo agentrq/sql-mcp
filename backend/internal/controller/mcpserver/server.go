@@ -36,6 +36,9 @@ type Caller struct {
 	UserID       int64
 	DatabaseID   int64
 	DatabaseName string
+	// Driver is the engine's ID ("postgres", "mysql"), so the agent writes
+	// the right dialect.
+	Driver string
 }
 
 type callerKey struct{}
@@ -64,6 +67,16 @@ const ToolDescription = "Read-only SQL on this database. Takes {action, payload}
 	"query {sql, store?} (one SELECT; PII columns, SELECT * over a table with PII, and writes are rejected), " +
 	"help {topic?}. Answers are TOON: a table names its columns once, then one line per row. Start with listTables."
 
+// dialect tells the agent which SQL to write, by driver ID. The MySQL
+// driver also serves MariaDB; its sql_mode has no ANSI_QUOTES and sets
+// NO_BACKSLASH_ESCAPES (see sqlguard), which is what the hint describes.
+var dialect = map[string]string{
+	"postgres": "The engine is PostgreSQL: write PostgreSQL SQL. Quote identifiers with double quotes, strings with single quotes; " +
+		"names are schema.table; ILIKE, ::type casts and LIMIT n OFFSET m work. ",
+	"mysql": "The engine is MySQL (or MariaDB): write MySQL SQL. Quote identifiers with backticks; double quotes are strings, not identifiers, " +
+		"and a backslash is not an escape character. A schema is a database (db.table); there is no ILIKE or :: cast (use CAST). ",
+}
+
 type input struct {
 	Action  string         `json:"action" jsonschema:"listTables, describeTable, query or help"`
 	Payload map[string]any `json:"payload,omitempty" jsonschema:"the action's fields; help prints them"`
@@ -72,10 +85,11 @@ type input struct {
 // NewServer is the MCP server for one caller and database.
 func NewServer(backend Backend, caller Caller, version string) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "sql-mcp", Title: "SQL MCP: " + caller.DatabaseName, Version: version}, &mcp.ServerOptions{
-		Instructions: fmt.Sprintf("SQL MCP for the database %q. Use the `sql` tool: call listTables first, then query with explicit column lists. "+
+		Instructions: fmt.Sprintf("SQL MCP for the database %q. %s"+
+			"Use the `sql` tool: call listTables first, then query with explicit column lists. "+
 			"Columns marked PII cannot be selected, filtered, sorted or joined on; a query that touches one is rejected with the reason. "+
 			"Large results come back cut to a preview with a temporary tmphost.io URL holding every row. "+
-			"Answers are TOON: `key: value` lines, and tables as `name[rows]{col,col}:` followed by one comma-separated line per row.", caller.DatabaseName),
+			"Answers are TOON: `key: value` lines, and tables as `name[rows]{col,col}:` followed by one comma-separated line per row.", caller.DatabaseName, dialect[caller.Driver]),
 	})
 	t := &tool{backend: backend, caller: caller}
 	mcp.AddTool(srv, &mcp.Tool{

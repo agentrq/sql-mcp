@@ -134,11 +134,10 @@ func TestDatabaseLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "shop-4", up.Name)
 
-	owner, name, err := env.Ctrl.SystemDatabaseOwner(ctx, id)
+	owner, err := env.Ctrl.SystemDatabaseOwner(ctx, id)
 	require.NoError(t, err)
-	assert.Equal(t, alice, owner)
-	assert.Equal(t, "shop-4", name)
-	_, _, err = env.Ctrl.SystemDatabaseOwner(ctx, 1)
+	assert.Equal(t, crud.DatabaseOwner{UserID: alice, Name: "shop-4", Driver: "postgres"}, owner)
+	_, err = env.Ctrl.SystemDatabaseOwner(ctx, 1)
 	assert.ErrorIs(t, err, entity.ErrNotFound)
 
 	version, err := env.Ctrl.TestConnection(ctx, "postgres", testutil.GoodDSN)
