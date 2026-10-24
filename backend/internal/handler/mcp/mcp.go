@@ -356,6 +356,6 @@ func (h *handler) serveMCP(w http.ResponseWriter, r *http.Request) {
 		h.challenge(w, idStr, "invalid or expired token")
 		return
 	}
-	ctx := mcpserver.WithCaller(r.Context(), mcpserver.Caller{UserID: owner.UserID, DatabaseID: id, DatabaseName: owner.Name, Driver: owner.Driver})
+	ctx := mcpserver.WithCaller(r.Context(), mcpserver.Caller{UserID: owner.UserID, DatabaseID: id, DatabaseName: owner.Name, Driver: owner.Driver, AgentMarksPII: owner.AgentMarksPII})
 	h.mcp.ServeHTTP(w, r.WithContext(ctx))
 }

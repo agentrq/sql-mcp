@@ -19,10 +19,10 @@ const SCHEMA = {
 describe('PiiEditor', () => {
   afterEach(() => { vi.unstubAllGlobals(); useToasts().toasts.value = [] })
 
-  async function mountEditor(extra = {}) {
+  async function mountEditor(extra = {}, props = {}) {
     setActivePinia(createPinia())
     const f = mockFetch({ 'GET /databases/d1/schema': SCHEMA, 'GET /databases/d1/pii': { piiColumns: [] }, ...extra })
-    const w = mount(PiiEditor, { props: { databaseId: 'd1' } })
+    const w = mount(PiiEditor, { props: { databaseId: 'd1', ...props } })
     await flush(); await flush()
     return { w, f }
   }
@@ -59,6 +59,56 @@ describe('PiiEditor', () => {
     expect(w.findAll('[data-test="pii-column"]')).toHaveLength(1)
     await w.find('[data-test="pii-column"]').setValue(true)
     expect(w.find('[data-test="selected-count"]').text()).toBe('3 columns selected')
+  })
+
+  it('keeps columns the agent marked after the editor loaded', async () => {
+    let calls = 0
+    const { w, f } = await mountEditor({
+      // By the save, the agent has marked orders.id.
+      'GET /databases/d1/pii': () => ({ piiColumns: [
+        { schema: 'public', table: 'users', column: 'email' },
+        ...(calls++ ? [{ schema: 'public', table: 'orders', column: 'id' }] : []),
+      ] }),
+      'PUT /databases/d1/pii': (init) => ({ piiColumns: JSON.parse(init.body).piiColumns }),
+    }, { agentMarksPii: true })
+    await w.find('[data-test="select-suggested"]').trigger('click')
+    await w.find('[data-test="save-pii"]').trigger('click')
+    await flush(); await flush()
+    const put = f.mock.calls.find((c) => c[1]?.method === 'PUT')
+    expect(JSON.parse(put[1].body).piiColumns).toEqual([
+      { schema: 'public', table: 'orders', column: 'id' },
+      { schema: 'public', table: 'users', column: 'email' },
+      { schema: 'public', table: 'users', column: 'phone' },
+    ])
+    expect(w.emitted('saved')[0]).toEqual([3])
+  })
+
+  it('turns the agent marking PII on and off', async () => {
+    const { w, f } = await mountEditor({
+      'PUT /databases/d1/pii/agent': (init) => ({ database: { id: 'd1', ...JSON.parse(init.body) } }),
+    })
+    const sw = w.find('[data-test="agent-marks-pii"]')
+    expect(sw.attributes('aria-checked')).toBe('false')
+    await sw.trigger('click')
+    await flush(); await flush()
+    expect(JSON.parse(f.mock.calls.at(-1)[1].body)).toEqual({ agentMarksPii: true })
+    expect(w.emitted('agent-changed')[0]).toEqual([{ id: 'd1', agentMarksPii: true }])
+    expect(useToasts().toasts.value.at(-1).message).toContain('can now mark')
+
+    await w.setProps({ agentMarksPii: true })
+    expect(sw.attributes('aria-checked')).toBe('true')
+    await sw.trigger('click')
+    await flush(); await flush()
+    expect(JSON.parse(f.mock.calls.at(-1)[1].body)).toEqual({ agentMarksPii: false })
+    expect(useToasts().toasts.value.at(-1).message).toContain('no longer')
+  })
+
+  it('reports a failed switch', async () => {
+    const { w } = await mountEditor({ 'PUT /databases/d1/pii/agent': [500, { error: { message: 'boom' } }] })
+    await w.find('[data-test="agent-marks-pii"]').trigger('click')
+    await flush(); await flush()
+    expect(w.emitted('agent-changed')).toBeUndefined()
+    expect(useToasts().toasts.value.at(-1).message).toBe('boom')
   })
 
   it('shows a schema load error', async () => {

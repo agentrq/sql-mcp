@@ -42,7 +42,8 @@
 
       <div class="flex-1 px-4 pb-6 min-w-0 flex flex-col">
         <ConnectPanel v-if="activeTab === 'connect'" :database="database" />
-        <PiiEditor v-else-if="activeTab === 'pii'" :database-id="database.id" @saved="onPiiSaved" />
+        <PiiEditor v-else-if="activeTab === 'pii'" :database-id="database.id" :agent-marks-pii="!!database.agentMarksPii"
+                   @saved="onPiiSaved" @agent-changed="onAgentChanged" />
         <QueryConsole v-else-if="activeTab === 'query'" :database-id="database.id" />
         <ActivityPanel v-else-if="activeTab === 'activity'" :database-id="database.id" :driver="database.driver" />
       </div>
@@ -101,5 +102,10 @@ onMounted(async () => {
 function onPiiSaved(count) {
   database.value = { ...database.value, piiColumnCount: count }
   store.upsert(database.value)
+}
+
+function onAgentChanged(db) {
+  database.value = db
+  store.upsert(db)
 }
 </script>

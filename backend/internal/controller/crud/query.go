@@ -143,11 +143,14 @@ func queryLogEntity(q *model.QueryLog) entity.QueryLog {
 	}
 }
 
-// DatabaseOwner is who owns a database, its name and its engine.
+// DatabaseOwner is who owns a database, its name, its engine and whether
+// its agent may mark PII.
 type DatabaseOwner struct {
 	UserID int64
 	Name   string
 	Driver string
+	// AgentMarksPII is whether the owner lets the MCP agent add PII columns.
+	AgentMarksPII bool
 }
 
 // SystemDatabaseOwner returns who owns a database, for the MCP server to
@@ -157,7 +160,7 @@ func (c *Controller) SystemDatabaseOwner(ctx context.Context, id int64) (Databas
 	if err != nil {
 		return DatabaseOwner{}, mapErr(err)
 	}
-	return DatabaseOwner{UserID: row.UserID, Name: row.Name, Driver: row.Driver}, nil
+	return DatabaseOwner{UserID: row.UserID, Name: row.Name, Driver: row.Driver, AgentMarksPII: row.AgentMarksPII}, nil
 }
 
 // ToCSV writes a result as CSV, the header first.

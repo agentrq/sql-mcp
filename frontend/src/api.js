@@ -173,6 +173,12 @@ export async function savePiiColumns(id, piiColumns) {
   return data?.piiColumns || []
 }
 
+/** Lets, or stops, the database's MCP agent marking PII columns; the updated database. */
+export async function setAgentMarksPii(id, agentMarksPii) {
+  const data = await request(`/databases/${enc(id)}/pii/agent`, { method: 'PUT', body: { agentMarksPii } })
+  return data?.database
+}
+
 /** `{ columns, rows, rowCount, truncated }`; a query touching PII rejects with status 422. */
 export function runQuery(id, sql) {
   return request(`/databases/${enc(id)}/query`, { method: 'POST', body: { sql } })

@@ -98,7 +98,9 @@ including the port, for example `https://sql.example.com:3443`.
    Its database is where a table with no schema is looked up, and a PII
    column marked with no schema lives there.
 2. On the **PII columns** tab, tick the columns to protect. Columns whose
-   names look like PII (email, phone, ssn…) are suggested.
+   names look like PII (email, phone, ssn…) are suggested. Turn on **Let the
+   agent mark PII columns** to have MCP clients mark more as they find them;
+   an agent can only add marks, and only you can remove one.
 3. On the **Connect** tab, copy the MCP URL (`<APP_BASE_URL>/mcp/<id>`) and
    add it to your client, for example
    `claude mcp add --transport http shop https://sql.example.com/mcp/<id>`.
@@ -114,6 +116,7 @@ The MCP server has one tool, `sql`, which takes `{action, payload}`:
 | `listTables` | none | every table and view, with its PII columns |
 | `describeTable` | `{table, schema?}` | columns, types, PII flags |
 | `query` | `{sql, store?}` | one read-only `SELECT` |
+| `markPii` | `{table, schema?, columns}` | mark columns as PII; offered only when the owner allows it, and it never unmarks |
 | `help` | `{topic?}` | usage |
 
 The **Query** tab runs the same checks from the browser, and **Activity** logs

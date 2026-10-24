@@ -1,13 +1,16 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import LoadingState from './LoadingState.vue'
-import { fetchPiiColumns, fetchSchema, savePiiColumns } from '../api'
+import { fetchPiiColumns, fetchSchema, savePiiColumns, setAgentMarksPii } from '../api'
 import { tableKey, tableLabel, usePiiSelection } from '../composables/usePiiSelection'
 import { useToasts } from '../composables/useToasts'
-import { BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY } from '../ui'
+import { BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY, CARD } from '../ui'
 
-const props = defineProps({ databaseId: { type: String, required: true } })
-const emit = defineEmits(['saved'])
+const props = defineProps({
+  databaseId: { type: String, required: true },
+  agentMarksPii: { type: Boolean, default: false },
+})
+const emit = defineEmits(['saved', 'agent-changed'])
 
 const { notifySuccess, notifyError } = useToasts()
 const pii = usePiiSelection()
@@ -53,7 +56,10 @@ async function load() {
 async function save() {
   saving.value = true
   try {
-    const saved = await savePiiColumns(props.databaseId, pii.toPayload())
+    // The agent may have marked columns since the editor loaded: apply this
+    // editor's changes to the current set rather than replacing it.
+    const latest = await fetchPiiColumns(props.databaseId)
+    const saved = await savePiiColumns(props.databaseId, pii.toPayloadOnto(latest))
     pii.markSaved(saved)
     emit('saved', pii.selectedCount.value)
     notifySuccess(`${pii.selectedCount.value} PII ${pii.selectedCount.value === 1 ? 'column' : 'columns'} saved`)
@@ -61,6 +67,20 @@ async function save() {
     notifyError(err?.message || 'Failed to save PII columns')
   } finally {
     saving.value = false
+  }
+}
+
+const switching = ref(false)
+async function toggleAgent() {
+  switching.value = true
+  try {
+    const db = await setAgentMarksPii(props.databaseId, !props.agentMarksPii)
+    emit('agent-changed', db)
+    notifySuccess(db.agentMarksPii ? 'The agent can now mark PII columns' : 'The agent can no longer mark PII columns')
+  } catch (err) {
+    notifyError(err?.message || 'Failed to change the setting')
+  } finally {
+    switching.value = false
   }
 }
 
@@ -90,6 +110,23 @@ onMounted(load)
         Mark every column that holds personal data. Any query that reads, filters or joins on a marked column is rejected,
         for MCP clients and the console alike.
       </p>
+
+      <!-- Delegating to the agent -->
+      <div :class="CARD" class="flex items-start gap-3 px-4 py-3 mb-4">
+        <button type="button" role="switch" data-test="agent-marks-pii" :aria-checked="agentMarksPii" :disabled="switching"
+                aria-labelledby="agent-marks-pii-label" @click="toggleAgent"
+                class="relative mt-0.5 w-8 h-[18px] rounded-full shrink-0 transition-colors disabled:opacity-40"
+                :class="agentMarksPii ? 'bg-black dark:bg-white' : 'bg-gray-200 dark:bg-zinc-700'">
+          <span class="absolute top-[3px] left-[3px] w-3 h-3 rounded-full bg-white dark:bg-zinc-900 transition-transform"
+                :class="agentMarksPii ? 'translate-x-[14px]' : ''"></span>
+        </button>
+        <div class="min-w-0">
+          <p id="agent-marks-pii-label" class="text-xs font-bold text-gray-900 dark:text-zinc-100">Let the agent mark PII columns</p>
+          <p class="text-[11px] text-gray-500 dark:text-zinc-400 mt-0.5 max-w-3xl">
+            MCP clients can then mark columns they find holding personal data. They can only add marks, never remove one: only you can uncheck a column, here.
+          </p>
+        </div>
+      </div>
 
       <!-- Toolbar -->
       <div class="flex flex-col md:flex-row md:items-center gap-2 mb-3">

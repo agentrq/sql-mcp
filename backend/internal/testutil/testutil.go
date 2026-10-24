@@ -30,11 +30,13 @@ import (
 const GoodDSN = "postgres://app:secret@db.internal:5432/shop"
 
 // Driver is a fake engine with a users table whose email column looks
-// like PII. Query returns Rows rows, or QueryErr.
+// like PII. Query returns Rows rows, or QueryErr. Extra tables are added to
+// the schema.
 type Driver struct {
 	Rows      int
 	QueryErr  error
 	SchemaErr error
+	Extra     []dbdriver.Table
 }
 
 func (*Driver) ID() string                  { return "postgres" }
@@ -58,7 +60,7 @@ func (d *Driver) Schema(context.Context, string) ([]dbdriver.Table, error) {
 	if d.SchemaErr != nil {
 		return nil, d.SchemaErr
 	}
-	return []dbdriver.Table{
+	return append([]dbdriver.Table{
 		{Schema: "public", Name: "users", Kind: "table", Columns: []dbdriver.Column{
 			{Name: "id", DataType: "integer"},
 			{Name: "email", DataType: "text", SuggestedPII: true},
@@ -66,7 +68,7 @@ func (d *Driver) Schema(context.Context, string) ([]dbdriver.Table, error) {
 		{Schema: "public", Name: "orders", Kind: "table", Columns: []dbdriver.Column{
 			{Name: "id", DataType: "integer"}, {Name: "total", DataType: "numeric"},
 		}},
-	}, nil
+	}, d.Extra...), nil
 }
 func (d *Driver) Query(_ context.Context, _, _ string, maxRows int, _ time.Duration) (*dbdriver.Result, error) {
 	if d.QueryErr != nil {
