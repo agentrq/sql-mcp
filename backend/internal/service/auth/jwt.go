@@ -37,6 +37,21 @@ const (
 	MCPRefreshAudience = "mcp_refresh"
 	// AdminAudience marks the admin token minted for the root token.
 	AdminAudience = "actor:admin"
+	// CLIAccessAudience and CLIRefreshAudience mark the tokens the sqlmcp
+	// CLI holds: a person's grant to the databases they picked, distinct
+	// from the browser's session and from any MCP grant.
+	CLIAccessAudience  = "actor:cli"
+	CLIRefreshAudience = "refresh:cli"
+)
+
+const (
+	// CLIClientID is the CLI's built-in public client: no secret, no
+	// registration, and only a loopback redirect.
+	CLIClientID = "sqlmcp-cli"
+	// CLIResource stands where a database ID goes in the consent and code of
+	// a CLI sign-in. A colon is no base62, so no database has it as its ID,
+	// and a CLI code is never redeemable for a database's MCP server.
+	CLIResource = "cli:"
 )
 
 const (
@@ -51,6 +66,11 @@ const (
 	// database's owner revokes it by deleting the database or rotating
 	// JWT_SECRET.
 	MCPRefreshTokenTTL = 30 * 24 * time.Hour
+	// CLIAccessTokenTTL is short because a refresh is where the allowlist is
+	// checked again. Each refresh issues a new refresh token, so a CLI in use
+	// stays signed in; one unused for CLIRefreshTokenTTL must log in again.
+	CLIAccessTokenTTL  = time.Hour
+	CLIRefreshTokenTTL = 30 * 24 * time.Hour
 )
 
 // Claims is a person's session, or an MCP grant.
@@ -88,6 +108,20 @@ type Consent struct {
 type consentClaims struct {
 	jwt.RegisteredClaims
 	Consent
+	// Databases are the IDs the person picked, for a CLI sign-in's code.
+	Databases []string `json:"dbs,omitempty"`
+}
+
+// Grant is who a code or a CLI token is for, and the databases a CLI one
+// opens.
+type Grant struct {
+	UserID    string
+	Databases []string
+}
+
+type cliClaims struct {
+	jwt.RegisteredClaims
+	Databases []string `json:"dbs"`
 }
 
 // TokenService signs and checks tokens.
@@ -249,29 +283,31 @@ func (s *TokenService) ValidateConsentToken(token, userID string, consent Consen
 	return nil
 }
 
-// CreateCode mints a two-minute authorization code bound to the request.
-func (s *TokenService) CreateCode(userID string, consent Consent) (string, error) {
-	return s.sign(consentClaims{RegisteredClaims: s.registered(userID, CodeTTL, consent.DatabaseID, CodeAudience), Consent: consent})
+// CreateCode mints a two-minute authorization code bound to the request,
+// and to the databases picked for a CLI sign-in (none for an MCP one).
+func (s *TokenService) CreateCode(userID string, consent Consent, databases []string) (string, error) {
+	return s.sign(consentClaims{RegisteredClaims: s.registered(userID, CodeTTL, consent.DatabaseID, CodeAudience), Consent: consent, Databases: databases})
 }
 
 // RedeemCode checks a code against the token request: the same database,
 // client and redirect_uri it was issued for, and the PKCE verifier whose
 // challenge the authorization request carried (RFC 7636, S256 only).
-func (s *TokenService) RedeemCode(code, databaseID, clientID, redirectURI, verifier string) (string, error) {
+// It returns the user and the databases the code was bound to.
+func (s *TokenService) RedeemCode(code, databaseID, clientID, redirectURI, verifier string) (Grant, error) {
 	c := &consentClaims{}
 	if err := s.parse(code, c, databaseID, CodeAudience); err != nil {
-		return "", err
+		return Grant{}, err
 	}
 	if c.DatabaseID != databaseID || c.ClientID != clientID {
-		return "", errors.New("auth: code was issued to another client")
+		return Grant{}, errors.New("auth: code was issued to another client")
 	}
 	if redirectURI != "" && redirectURI != c.RedirectURI {
-		return "", errors.New("auth: redirect_uri does not match the authorization request")
+		return Grant{}, errors.New("auth: redirect_uri does not match the authorization request")
 	}
 	if c.CodeChallenge == "" || S256(verifier) != c.CodeChallenge {
-		return "", errors.New("auth: code_verifier does not match the code_challenge")
+		return Grant{}, errors.New("auth: code_verifier does not match the code_challenge")
 	}
-	return c.Subject, nil
+	return Grant{UserID: c.Subject, Databases: c.Databases}, nil
 }
 
 // S256 is the PKCE S256 challenge of verifier.
@@ -309,4 +345,32 @@ func (s *TokenService) ValidateMCPRefreshToken(token, databaseID string) (string
 		return "", err
 	}
 	return c.Subject, nil
+}
+
+// CreateCLITokens mints the access and refresh token the CLI holds for the
+// databases its person picked.
+func (s *TokenService) CreateCLITokens(g Grant) (access, refresh string, err error) {
+	access, err = s.sign(cliClaims{RegisteredClaims: s.registered(g.UserID, CLIAccessTokenTTL, CLIAccessAudience), Databases: g.Databases})
+	if err == nil {
+		refresh, err = s.sign(cliClaims{RegisteredClaims: s.registered(g.UserID, CLIRefreshTokenTTL, CLIRefreshAudience), Databases: g.Databases})
+	}
+	return access, refresh, err
+}
+
+// ValidateCLIAccessToken accepts only the CLI's access token.
+func (s *TokenService) ValidateCLIAccessToken(token string) (Grant, error) {
+	return s.cliGrant(token, CLIAccessAudience)
+}
+
+// ValidateCLIRefreshToken accepts only the CLI's refresh token.
+func (s *TokenService) ValidateCLIRefreshToken(token string) (Grant, error) {
+	return s.cliGrant(token, CLIRefreshAudience)
+}
+
+func (s *TokenService) cliGrant(token, audience string) (Grant, error) {
+	c := &cliClaims{}
+	if err := s.parse(token, c, audience); err != nil {
+		return Grant{}, err
+	}
+	return Grant{UserID: c.Subject, Databases: c.Databases}, nil
 }

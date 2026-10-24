@@ -53,6 +53,12 @@ h1 { margin: 0 0 8px; font-size: 24px; line-height: 1.25; font-weight: 900; lett
 .row dd { margin: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .hint { margin: 0 0 24px; font-size: 13px; line-height: 1.6; color: var(--muted); text-align: center; }
 .actions { display: flex; gap: 12px; }
+.dbs { margin: 0 0 20px; padding: 8px 16px; border: 1px solid var(--row-border); border-radius: 16px; background: var(--row); max-height: 16rem; overflow-y: auto; }
+.dbs legend { padding: 0 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--label); }
+.db { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 14px; cursor: pointer; overflow-wrap: anywhere; }
+.db input { width: 16px; height: 16px; flex: none; }
+.empty { margin: 8px 0; font-size: 14px; color: var(--muted); }
+.error { margin: 0 0 16px; font-size: 14px; font-weight: 600; color: #dc2626; text-align: center; }
 button { flex: 1; padding: 16px 24px; border-radius: 16px; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
 button:active { transform: scale(0.98); }
 .deny { background: var(--secondary); color: var(--secondary-text); border: 1px solid var(--secondary-border); }
@@ -69,22 +75,38 @@ button:active { transform: scale(0.98); }
     </svg>
   </div>
   <h1 data-test="consent-client">{{if .Named}}{{.ClientName}}{{else}}An unnamed app{{end}}</h1>
+  {{if .CLI}}
+  <p class="lead">wants to sign in to SQL MCP from the command line.</p>
+  <p class="badge" data-test="consent-identity">The sqlmcp command line. Allow it only if you just ran <b>sqlmcp login</b> on this computer.</p>
+  {{else}}
   <p class="lead">wants to query a database through SQL MCP.</p>
-  {{if .Registered}}
+  {{end}}
+  {{if .CLI}}{{else if .Registered}}
   <p class="badge" data-test="consent-identity">Unverified name. Any app can call itself anything, so check where it sends you back.</p>
   {{else}}
   <p class="badge" data-test="consent-identity">Unknown app. SQL MCP has no record of who made it, so check where it sends you back.</p>
   {{end}}
   <dl class="rows">
-    <div class="row"><dt>It will be able to</dt><dd data-test="consent-access">Run read-only queries on “{{.DatabaseName}}”, except on columns you marked as PII, and store results on your tmphost account when it is connected.</dd></div>
+    <div class="row"><dt>It will be able to</dt><dd data-test="consent-access">{{if .CLI}}See the databases you pick below and their PII columns, run read-only queries on them except on columns you marked as PII, and mark more columns as PII. It can’t unmark a column or change a database.{{else}}Run read-only queries on “{{.DatabaseName}}”, except on columns you marked as PII, and store results on your tmphost account when it is connected.{{end}}</dd></div>
     <div class="row"><dt>Sends you back to</dt><dd data-test="consent-destination">{{.Destination}}</dd></div>
     {{if .Email}}<div class="row"><dt>Signed in as</dt><dd data-test="consent-account">{{.Email}}</dd></div>{{end}}
   </dl>
   <p class="hint">Only allow an app you just asked to connect. If you didn’t, deny.</p>
-  <form method="post" class="actions">
+  <form method="post">
     <input type="hidden" name="consent" value="{{.Token}}">
-    <button type="submit" name="decision" value="deny" class="deny" data-test="consent-deny">Deny</button>
-    <button type="submit" name="decision" value="allow" class="allow" data-test="consent-allow">Allow</button>
+    {{if .CLI}}
+    <fieldset class="dbs" data-test="consent-databases">
+      <legend>Databases it may open</legend>
+      {{range .Databases}}<label class="db"><input type="checkbox" name="db" value="{{.ID}}"> <span>{{.Name}}</span></label>
+      {{else}}<p class="empty" data-test="consent-no-databases">You have no databases yet. Add one in SQL MCP, then run sqlmcp login again.</p>
+      {{end}}
+    </fieldset>
+    {{end}}
+    {{if .Error}}<p class="error" role="alert" data-test="consent-error">{{.Error}}</p>{{end}}
+    <div class="actions">
+      <button type="submit" name="decision" value="deny" class="deny" data-test="consent-deny">Deny</button>
+      <button type="submit" name="decision" value="allow" class="allow" data-test="consent-allow">Allow</button>
+    </div>
   </form>
 </main>
 </body>

@@ -112,12 +112,12 @@ func TestConsentToken(t *testing.T) {
 func TestRedeemCode(t *testing.T) {
 	s, now := testTokens(t)
 	consent := testConsent()
-	code, err := s.CreateCode("u1", consent)
+	code, err := s.CreateCode("u1", consent, nil)
 	require.NoError(t, err)
 
-	user, err := s.RedeemCode(code, "db1", "c1", "http://localhost/cb", "verifier")
+	grant, err := s.RedeemCode(code, "db1", "c1", "http://localhost/cb", "verifier")
 	require.NoError(t, err)
-	assert.Equal(t, "u1", user)
+	assert.Equal(t, Grant{UserID: "u1"}, grant)
 
 	// redirect_uri may be omitted at the token endpoint.
 	_, err = s.RedeemCode(code, "db1", "c1", "", "verifier")
@@ -125,11 +125,11 @@ func TestRedeemCode(t *testing.T) {
 
 	noChallenge := consent
 	noChallenge.CodeChallenge = ""
-	codeNoChallenge, err := s.CreateCode("u1", noChallenge)
+	codeNoChallenge, err := s.CreateCode("u1", noChallenge, nil)
 	require.NoError(t, err)
 	otherClient := consent
 	otherClient.ClientID = "c2"
-	codeOtherClient, err := s.CreateCode("u1", otherClient)
+	codeOtherClient, err := s.CreateCode("u1", otherClient, nil)
 	require.NoError(t, err)
 
 	for _, tc := range []struct {
@@ -151,6 +151,41 @@ func TestRedeemCode(t *testing.T) {
 	*now = now.Add(CodeTTL + time.Second)
 	_, err = s.RedeemCode(code, "db1", "c1", "", "verifier")
 	assert.ErrorIs(t, err, jwt.ErrTokenExpired)
+}
+
+func TestCLICode(t *testing.T) {
+	s, _ := testTokens(t)
+	consent := Consent{DatabaseID: CLIResource, ClientID: CLIClientID, RedirectURI: "http://127.0.0.1:5000/callback", CodeChallenge: S256("verifier")}
+	code, err := s.CreateCode("u1", consent, []string{"db1", "db2"})
+	require.NoError(t, err)
+
+	grant, err := s.RedeemCode(code, CLIResource, CLIClientID, "", "verifier")
+	require.NoError(t, err)
+	assert.Equal(t, Grant{UserID: "u1", Databases: []string{"db1", "db2"}}, grant)
+
+	// A CLI code opens no database's MCP server, whatever it names.
+	_, err = s.RedeemCode(code, "db1", CLIClientID, "", "verifier")
+	assert.Error(t, err)
+}
+
+func TestCLITokens(t *testing.T) {
+	s, now := testTokens(t)
+	want := Grant{UserID: "u1", Databases: []string{"db1", "db2"}}
+	access, refresh, err := s.CreateCLITokens(want)
+	require.NoError(t, err)
+
+	got, err := s.ValidateCLIAccessToken(access)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	got, err = s.ValidateCLIRefreshToken(refresh)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	*now = now.Add(CLIAccessTokenTTL + time.Second)
+	_, err = s.ValidateCLIAccessToken(access)
+	assert.ErrorIs(t, err, jwt.ErrTokenExpired)
+	_, err = s.ValidateCLIRefreshToken(refresh)
+	assert.NoError(t, err)
 }
 
 func TestS256(t *testing.T) {
@@ -188,8 +223,9 @@ func TestAudiencesDoNotCross(t *testing.T) {
 	state, _ := s.CreateStateToken("google", "")
 	client, _ := s.CreateClientID(nil, "")
 	consent, _ := s.CreateConsentToken("u1", testConsent())
-	code, _ := s.CreateCode("u1", testConsent())
+	code, _ := s.CreateCode("u1", testConsent(), nil)
 	mcpAccess, mcpRefresh, _ := s.CreateMCPTokens("u1", "db1")
+	cliAccess, cliRefresh, _ := s.CreateCLITokens(Grant{UserID: "u1", Databases: []string{"db1"}})
 
 	validators := map[string]func(string) error{
 		"access":  func(t string) error { _, err := s.ValidateAccessToken(t); return err },
@@ -203,10 +239,13 @@ func TestAudiencesDoNotCross(t *testing.T) {
 		},
 		"mcpAccess":  func(t string) error { _, err := s.ValidateMCPAccessToken(t, "db1"); return err },
 		"mcpRefresh": func(t string) error { _, err := s.ValidateMCPRefreshToken(t, "db1"); return err },
+		"cliAccess":  func(t string) error { _, err := s.ValidateCLIAccessToken(t); return err },
+		"cliRefresh": func(t string) error { _, err := s.ValidateCLIRefreshToken(t); return err },
 	}
 	tokens := map[string]string{
 		"access": access, "refresh": refresh, "state": state, "client": client,
 		"consent": consent, "code": code, "mcpAccess": mcpAccess, "mcpRefresh": mcpRefresh,
+		"cliAccess": cliAccess, "cliRefresh": cliRefresh,
 	}
 	for kind, token := range tokens {
 		for name, validate := range validators {

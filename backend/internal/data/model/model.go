@@ -74,6 +74,7 @@ const (
 const (
 	SourceMCP     = "mcp"
 	SourceConsole = "console"
+	SourceCLI     = "cli"
 )
 
 // QueryLog is one query someone ran, allowed or not.

@@ -25,7 +25,7 @@ import (
 type Tokens interface {
 	CreateConsentToken(userID string, consent auth.Consent) (string, error)
 	ValidateConsentToken(token, userID string, consent auth.Consent) error
-	CreateCode(userID string, consent auth.Consent) (string, error)
+	CreateCode(userID string, consent auth.Consent, databases []string) (string, error)
 }
 
 // Request is one authorization request, its redirect_uri already checked
@@ -40,6 +40,16 @@ type Request struct {
 	// RegisteredRedirectURIs and BaseURL are what CheckRedirectURI was given.
 	RegisteredRedirectURIs []string
 	BaseURL                string
+	// CLI is a sign-in of the sqlmcp command line: the person picks which of
+	// Databases it may open, at least one, and the code carries their IDs.
+	CLI       bool
+	Databases []Choice
+}
+
+// Choice is a database the person may grant the CLI.
+type Choice struct {
+	ID   string
+	Name string
 }
 
 const (
@@ -64,7 +74,7 @@ func Serve(w http.ResponseWriter, r *http.Request, tokens Tokens, req Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		render(w, newPage(req, token))
+		render(w, http.StatusOK, newPage(req, token))
 	case http.MethodPost:
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "invalid form", http.StatusBadRequest)
@@ -77,7 +87,14 @@ func Serve(w http.ResponseWriter, r *http.Request, tokens Tokens, req Request) {
 		state := url.Values{"state": {req.Consent.State}}
 		switch r.PostForm.Get("decision") {
 		case DecisionAllow:
-			code, err := tokens.CreateCode(req.UserID, req.Consent)
+			picked := picked(req, r.PostForm["db"])
+			if req.CLI && len(picked) == 0 {
+				p := newPage(req, r.PostForm.Get("consent"))
+				p.Error = "Pick at least one database."
+				render(w, http.StatusBadRequest, p)
+				return
+			}
+			code, err := tokens.CreateCode(req.UserID, req.Consent, picked)
 			if err != nil {
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
@@ -95,6 +112,24 @@ func Serve(w http.ResponseWriter, r *http.Request, tokens Tokens, req Request) {
 		w.Header().Set("Allow", "GET, HEAD, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// picked is the offered databases the form ticked, in the order offered; an
+// ID that was not offered is ignored.
+func picked(req Request, ticked []string) []string {
+	if !req.CLI {
+		return nil
+	}
+	var out []string
+	for _, d := range req.Databases {
+		for _, id := range ticked {
+			if id == d.ID {
+				out = append(out, d.ID)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // RedirectURL adds params to redirectURI, keeping its own query.
@@ -216,6 +251,9 @@ func destination(redirectURI string) string {
 }
 
 type page struct {
+	CLI          bool
+	Databases    []Choice
+	Error        string
 	ClientName   string
 	Named        bool
 	Registered   bool
@@ -229,6 +267,8 @@ type page struct {
 
 func newPage(req Request, token string) page {
 	return page{
+		CLI:          req.CLI,
+		Databases:    req.Databases,
 		ClientName:   req.ClientName,
 		Named:        req.ClientName != "",
 		Registered:   req.Registered,
@@ -257,7 +297,7 @@ func formActionSource(redirectURI string) string {
 	return u.Scheme + "://" + host
 }
 
-func render(w http.ResponseWriter, p page) {
+func render(w http.ResponseWriter, status int, p page) {
 	p.Nonce = rand.Text()
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
@@ -268,6 +308,7 @@ func render(w http.ResponseWriter, p page) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-"+p.Nonce+"'; form-action "+p.FormAction+"; base-uri 'none'; frame-ancestors 'none'")
+	w.WriteHeader(status)
 	if err := pageTemplate.Execute(w, p); err != nil {
 		log.Error().Err(err).Msg("could not render the consent page")
 	}
