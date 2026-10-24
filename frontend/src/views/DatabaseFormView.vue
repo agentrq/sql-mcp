@@ -16,11 +16,14 @@
       {{ loadError }}
     </div>
 
-    <form v-else @submit.prevent="save" class="px-4 pb-10 w-full space-y-6" data-test="database-form">
+    <!-- No autofill: the browser and password managers would put a saved login
+         in the name and DSN fields. -->
+    <form v-else @submit.prevent="save" class="px-4 pb-10 w-full space-y-6" data-test="database-form" autocomplete="off">
       <div :class="[CARD, 'p-5 sm:p-8 space-y-8']">
         <div>
           <label for="db-name" :class="LABEL">Name</label>
-          <input id="db-name" v-model="form.name" type="text" required maxlength="100" :class="INPUT" placeholder="e.g. analytics" autocomplete="off" />
+          <input id="db-name" v-model="form.name" type="text" required maxlength="100" :class="INPUT" placeholder="e.g. analytics"
+                 autocomplete="off" v-bind="NO_AUTOFILL" />
           <p :class="HINT">Shown in the sidebar and used as the MCP server name.</p>
         </div>
 
@@ -55,9 +58,12 @@
         <div>
           <label for="db-dsn" :class="LABEL">Connection string (DSN)</label>
           <div class="relative">
-            <input id="db-dsn" v-model="form.dsn" :type="showDsn ? 'text' : 'password'" :required="!isEdit"
-                   :class="[INPUT, 'font-mono pr-20']" :placeholder="isEdit ? (original?.dsnMasked || '') : dsnPlaceholder"
-                   autocomplete="off" spellcheck="false" autocapitalize="off" />
+            <!-- A text field masked by CSS, not type="password": browsers ignore
+                 autocomplete="off" on a password field and offer saved logins. -->
+            <input id="db-dsn" v-model="form.dsn" type="text" :required="!isEdit" :data-masked="!showDsn"
+                   :class="[INPUT, 'font-mono pr-20', showDsn ? '' : '[-webkit-text-security:disc]']"
+                   :placeholder="isEdit ? (original?.dsnMasked || '') : dsnPlaceholder"
+                   autocomplete="off" spellcheck="false" autocapitalize="off" v-bind="NO_AUTOFILL" />
             <button type="button" data-test="toggle-dsn" @click="showDsn = !showDsn" :class="[BTN_GHOST, 'absolute right-2 top-1/2 -translate-y-1/2']">
               {{ showDsn ? 'Hide' : 'Show' }}
             </button>
@@ -104,6 +110,9 @@ import { useToasts } from '../composables/useToasts'
 import { useDatabaseStore } from '../stores/databaseStore'
 import { DSN_FORMATS, DSN_PLACEHOLDERS, FALLBACK_DRIVERS } from '../utils/drivers'
 import { BTN_DANGER, BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY, CARD, HINT, INPUT, LABEL, PAGE_TITLE } from '../ui'
+
+// What 1Password, LastPass, Bitwarden and Dashlane read as "not a login field".
+const NO_AUTOFILL = { 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other' }
 
 const route = useRoute()
 const router = useRouter()
