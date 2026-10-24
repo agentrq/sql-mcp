@@ -224,6 +224,7 @@ type page struct {
 	Email        string
 	Token        string
 	Nonce        string
+	FormAction   string // the CSP form-action sources
 }
 
 func newPage(req Request, token string) page {
@@ -235,7 +236,25 @@ func newPage(req Request, token string) page {
 		Destination:  destination(req.Consent.RedirectURI),
 		Email:        req.Email,
 		Token:        token,
+		FormAction:   "'self' " + formActionSource(req.Consent.RedirectURI),
 	}
+}
+
+// formActionSource is where the form may end up. Chrome checks form-action
+// against the redirect a POST answers with too, so 'self' alone blocks the
+// redirect to the app and Allow does nothing. The redirect URI was checked,
+// so its scheme and host hold no CSP syntax.
+func formActionSource(redirectURI string) string {
+	u, _ := url.Parse(redirectURI)
+	if !isWeb(u) {
+		return u.Scheme + ":"
+	}
+	// An IP literal ([::1]) is not a host-source CSP matches reliably.
+	if net.ParseIP(u.Hostname()) != nil {
+		return u.Scheme + ":"
+	}
+	host, _ := displayHost(u)
+	return u.Scheme + "://" + host
 }
 
 func render(w http.ResponseWriter, p page) {
@@ -248,7 +267,7 @@ func render(w http.ResponseWriter, p page) {
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-"+p.Nonce+"'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-"+p.Nonce+"'; form-action "+p.FormAction+"; base-uri 'none'; frame-ancestors 'none'")
 	if err := pageTemplate.Execute(w, p); err != nil {
 		log.Error().Err(err).Msg("could not render the consent page")
 	}
