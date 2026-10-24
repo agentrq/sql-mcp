@@ -64,6 +64,9 @@ app state). A handler never calls the repository directly.
   in: the binary, the web app, CA certs, `/etc/passwd` and `/data`. A new
   runtime need (`/tmp`, tzdata) must be copied too, or it fails only in Docker.
   It runs as UID 65532 so volumes chowned for the old distroless image work.
+- **The image cross-compiles, never emulates.** Build stages run on
+  `$BUILDPLATFORM` with `GOARCH=$TARGETARCH`; a compile step in a per-platform
+  stage runs under QEMU (the arm64 Go build took ~13 minutes that way).
 - **Vite builds with `base: ''`.** The server rewrites `./` to `/` in
   `index.html` (`app.spa`). Without that rewrite, a hard reload on a nested
   route such as `/databases/x` serves a blank page.
