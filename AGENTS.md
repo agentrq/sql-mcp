@@ -71,7 +71,8 @@ app state). A handler never calls the repository directly.
   `index.html` (`app.spa`). Without that rewrite, a hard reload on a nested
   route such as `/databases/x` serves a blank page.
 - **Content is full width**, like AgentRQ: views don't cap their width
-  with `max-w-*`. Only prose paragraphs and modals are narrowed.
+  with `max-w-*`, and neither do hints and help text inside a card (the
+  human wants them on one line when there is room). Only modals are narrowed.
 - **No two paths may differ only by letter case** (`App.test.js` next to
   `app.test.js`). On macOS and Windows they are the same file, so the
   checkout comes out broken. `make check-case`, part of `make test`, fails on

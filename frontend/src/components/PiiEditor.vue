@@ -106,7 +106,7 @@ onMounted(load)
     </div>
 
     <template v-else>
-      <p class="text-xs text-gray-500 dark:text-zinc-400 mb-4 max-w-3xl">
+      <p class="text-xs text-gray-500 dark:text-zinc-400 mb-4">
         Mark every column that holds personal data. Any query that reads, filters or joins on a marked column is rejected,
         for MCP clients and the console alike.
       </p>
@@ -122,7 +122,7 @@ onMounted(load)
         </button>
         <div class="min-w-0">
           <p id="agent-marks-pii-label" class="text-xs font-bold text-gray-900 dark:text-zinc-100">Let the agent mark PII columns</p>
-          <p class="text-[11px] text-gray-500 dark:text-zinc-400 mt-0.5 max-w-3xl">
+          <p class="text-[11px] text-gray-500 dark:text-zinc-400 mt-0.5">
             MCP clients can then mark columns they find holding personal data. They can only add marks, never remove one: only you can uncheck a column, here.
           </p>
         </div>
