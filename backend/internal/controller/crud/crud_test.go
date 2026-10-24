@@ -277,7 +277,7 @@ func TestAgentMarksPII(t *testing.T) {
 	assert.ErrorIs(t, err, crud.ErrAgentMarksPIIOff)
 }
 
-func TestAgentMarkPIIWhenTheStoreFails(t *testing.T) {
+func TestAgentPIIWhenTheStoreFails(t *testing.T) {
 	env := testutil.New(t)
 	alice := signIn(t, env, "alice@example.com")
 	id := newDB(t, env, alice)
@@ -293,6 +293,10 @@ func TestAgentMarkPIIWhenTheStoreFails(t *testing.T) {
 	require.NoError(t, db.Exec("DROP TABLE pii_columns").Error)
 	_, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "", "users", []string{"email"})
 	assert.Error(t, err)
+
+	require.NoError(t, db.Exec("DROP TABLE databases").Error)
+	_, err = env.Ctrl.SetAgentMarksPII(ctx, alice, id, false)
+	assert.ErrorContains(t, err, "no such table")
 }
 
 func TestTooManyAgentPIIColumns(t *testing.T) {
