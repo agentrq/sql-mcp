@@ -29,7 +29,7 @@ import (
 
 // Owners looks up who owns a database.
 type Owners interface {
-	SystemDatabaseOwner(ctx context.Context, id int64) (ownerID int64, name string, err error)
+	SystemDatabaseOwner(ctx context.Context, id int64) (crud.DatabaseOwner, error)
 }
 
 // oauthScope is the only scope. Whatever a client asks for it is granted
@@ -101,14 +101,14 @@ func (h *handler) identityFor(id string) identity {
 }
 
 // database resolves the {id} path value to an existing database.
-func (h *handler) database(r *http.Request) (idStr string, id, ownerID int64, name string, err error) {
+func (h *handler) database(r *http.Request) (idStr string, id int64, owner crud.DatabaseOwner, err error) {
 	idStr = r.PathValue("id")
 	id = crud.ParseID(idStr)
 	if id == 0 {
-		return "", 0, 0, "", entity.ErrNotFound
+		return "", 0, crud.DatabaseOwner{}, entity.ErrNotFound
 	}
-	ownerID, name, err = h.owners.SystemDatabaseOwner(r.Context(), id)
-	return idStr, id, ownerID, name, err
+	owner, err = h.owners.SystemDatabaseOwner(r.Context(), id)
+	return idStr, id, owner, err
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -123,7 +123,7 @@ func oauthError(w http.ResponseWriter, status int, code, description string) {
 }
 
 func (h *handler) resourceMetadata(w http.ResponseWriter, r *http.Request) {
-	idStr, _, _, _, err := h.database(r)
+	idStr, _, _, err := h.database(r)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -140,7 +140,7 @@ func (h *handler) resourceMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) authServerMetadata(w http.ResponseWriter, r *http.Request) {
-	idStr, _, _, _, err := h.database(r)
+	idStr, _, _, err := h.database(r)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -167,7 +167,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if _, _, _, _, err := h.database(r); err != nil {
+	if _, _, _, err := h.database(r); err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -219,7 +219,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) {
 
 // authorize shows the consent page to the database's signed-in owner.
 func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
-	idStr, _, ownerID, dbName, err := h.database(r)
+	idStr, _, owner, err := h.database(r)
 	if err != nil {
 		http.Error(w, "database not found", http.StatusNotFound)
 		return
@@ -259,7 +259,7 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, oauthconsent.LoginURL(h.baseURL, h.baseURL+r.URL.RequestURI()), http.StatusFound)
 		return
 	}
-	if crud.ParseID(userID) != ownerID {
+	if crud.ParseID(userID) != owner.UserID {
 		http.Error(w, "This database belongs to another account. Sign in as its owner to connect it.", http.StatusForbidden)
 		return
 	}
@@ -269,7 +269,7 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 		Email:        email,
 		ClientName:   client.ClientName,
 		Registered:   true,
-		DatabaseName: dbName,
+		DatabaseName: owner.Name,
 		Consent: auth.Consent{
 			DatabaseID:    idStr,
 			ClientID:      clientID,
@@ -289,7 +289,7 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	idStr, _, ownerID, _, err := h.database(r)
+	idStr, _, owner, err := h.database(r)
 	if err != nil {
 		oauthError(w, http.StatusBadRequest, "invalid_grant", "database not found")
 		return
@@ -309,7 +309,7 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
 		return
 	}
-	if err != nil || crud.ParseID(userID) != ownerID {
+	if err != nil || crud.ParseID(userID) != owner.UserID {
 		oauthError(w, http.StatusBadRequest, "invalid_grant", "the grant is invalid, expired, or for another client")
 		return
 	}
@@ -336,7 +336,7 @@ func (h *handler) challenge(w http.ResponseWriter, idStr, message string) {
 }
 
 func (h *handler) serveMCP(w http.ResponseWriter, r *http.Request) {
-	idStr, id, ownerID, name, err := h.database(r)
+	idStr, id, owner, err := h.database(r)
 	if errors.Is(err, entity.ErrNotFound) {
 		http.NotFound(w, r)
 		return
@@ -352,10 +352,10 @@ func (h *handler) serveMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, err := h.tokens.ValidateMCPAccessToken(token, idStr)
-	if err != nil || crud.ParseID(userID) != ownerID {
+	if err != nil || crud.ParseID(userID) != owner.UserID {
 		h.challenge(w, idStr, "invalid or expired token")
 		return
 	}
-	ctx := mcpserver.WithCaller(r.Context(), mcpserver.Caller{UserID: ownerID, DatabaseID: id, DatabaseName: name})
+	ctx := mcpserver.WithCaller(r.Context(), mcpserver.Caller{UserID: owner.UserID, DatabaseID: id, DatabaseName: owner.Name, Driver: owner.Driver})
 	h.mcp.ServeHTTP(w, r.WithContext(ctx))
 }

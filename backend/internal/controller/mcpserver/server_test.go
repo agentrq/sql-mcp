@@ -43,9 +43,14 @@ func (b *backend) RunQuery(_ context.Context, rq crud.QueryRequest) (*entity.Que
 	return b.result, b.queryErr
 }
 
-var caller = mcpserver.Caller{UserID: 7, DatabaseID: 9, DatabaseName: "shop"}
+var caller = mcpserver.Caller{UserID: 7, DatabaseID: 9, DatabaseName: "shop", Driver: "postgres"}
 
 func session(t *testing.T, b *backend) *mcp.ClientSession {
+	t.Helper()
+	return sessionAs(t, b, caller)
+}
+
+func sessionAs(t *testing.T, b *backend, caller mcpserver.Caller) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
@@ -76,11 +81,27 @@ func TestToolList(t *testing.T) {
 	init := cs.InitializeResult()
 	assert.Equal(t, "SQL MCP: shop", init.ServerInfo.Title)
 	assert.Contains(t, init.Instructions, `"shop"`)
+	assert.Contains(t, init.Instructions, "The engine is PostgreSQL")
 	tools, err := cs.ListTools(context.Background(), nil)
 	require.NoError(t, err)
 	require.Len(t, tools.Tools, 1)
 	assert.Equal(t, "sql", tools.Tools[0].Name)
 	assert.True(t, tools.Tools[0].Annotations.ReadOnlyHint)
+}
+
+func TestInstructionsNameTheEngine(t *testing.T) {
+	my := caller
+	my.Driver = "mysql"
+	got := sessionAs(t, &backend{}, my).InitializeResult().Instructions
+	assert.Contains(t, got, "The engine is MySQL (or MariaDB)")
+	assert.Contains(t, got, "backticks")
+	assert.NotContains(t, got, "PostgreSQL")
+
+	other := caller
+	other.Driver = "oracle"
+	got = sessionAs(t, &backend{}, other).InitializeResult().Instructions
+	assert.NotContains(t, got, "The engine is", "an unknown engine gets no dialect hint")
+	assert.Contains(t, got, `"shop". Use the `+"`sql`"+` tool`)
 }
 
 func TestHelpAndUnknown(t *testing.T) {
