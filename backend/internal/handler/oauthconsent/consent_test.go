@@ -92,6 +92,8 @@ func TestServeGet(t *testing.T) {
 			assert.Equal(t, "no-store", h.Get("Cache-Control"))
 			assert.Equal(t, "DENY", h.Get("X-Frame-Options"))
 			assert.Contains(t, h.Get("Content-Security-Policy"), "frame-ancestors 'none'")
+			// The POST redirects to the app; form-action must allow it.
+			assert.Contains(t, h.Get("Content-Security-Policy"), "form-action 'self' http://localhost:3118;")
 
 			body := w.Body.String()
 			assert.Contains(t, body, "Claude &lt;b&gt;Code&lt;/b&gt;")
@@ -318,6 +320,19 @@ func TestDestination(t *testing.T) {
 		"https://app.com:8443/cb":        "app.com:8443",
 	} {
 		assert.Equal(t, want, destination(raw), raw)
+	}
+}
+
+func TestFormActionSource(t *testing.T) {
+	for raw, want := range map[string]string{
+		"cursor://cb":                    "cursor:",
+		"http://localhost:3118/callback": "http://localhost:3118",
+		"http://127.0.0.1:9/cb":          "http:",
+		"http://[::1]:9/cb":              "http:",
+		"https://bücher.example/cb?x=1":  "https://xn--bcher-kva.example",
+		"https://app.com:8443/cb":        "https://app.com:8443",
+	} {
+		assert.Equal(t, want, formActionSource(raw), raw)
 	}
 }
 
