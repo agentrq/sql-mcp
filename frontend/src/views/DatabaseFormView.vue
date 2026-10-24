@@ -37,9 +37,8 @@
                       form.driver === d.id ? 'border-gray-900 dark:border-white bg-gray-50 dark:bg-zinc-800/60' : 'border-gray-200 dark:border-zinc-800 hover:border-gray-300 dark:hover:border-zinc-700',
                       !d.available ? 'opacity-50' : ''
                     ]">
-              <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                   :class="form.driver === d.id ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300'">
-                <AppLogo class="w-5 h-5" />
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-white border border-gray-200 dark:border-zinc-700 text-gray-600">
+                <DriverIcon :driver="d.id" class="w-6 h-6" />
               </div>
               <div class="min-w-0 flex-1">
                 <div class="text-sm font-bold text-gray-900 dark:text-zinc-100">{{ d.name }}</div>
@@ -96,8 +95,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import AppLogo from '../components/AppLogo.vue'
 import DeleteModal from '../components/DeleteModal.vue'
+import DriverIcon from '../components/DriverIcon.vue'
 import LoadingState from '../components/LoadingState.vue'
 import { createDatabase, deleteDatabase, fetchDatabase, fetchDrivers, testConnection, updateDatabase } from '../api'
 import { useToasts } from '../composables/useToasts'

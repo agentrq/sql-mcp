@@ -10,8 +10,8 @@
       <!-- Page header -->
       <div class="py-2 mb-6 flex flex-col lg:flex-row lg:items-start justify-between gap-4 px-4">
         <div class="min-w-0 flex items-start gap-3">
-          <div class="w-10 h-10 rounded-xl bg-black dark:bg-white text-white dark:text-black flex items-center justify-center shrink-0 rotate-3">
-            <AppLogo class="w-5 h-5" />
+          <div class="w-10 h-10 rounded-xl bg-white border border-gray-200 dark:border-zinc-700 text-gray-700 flex items-center justify-center shrink-0 rotate-3">
+            <DriverIcon :driver="database.driver" class="w-6 h-6" />
           </div>
           <div class="min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
@@ -55,7 +55,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ActivityPanel from '../components/ActivityPanel.vue'
-import AppLogo from '../components/AppLogo.vue'
+import DriverIcon from '../components/DriverIcon.vue'
 import ConnectPanel from '../components/ConnectPanel.vue'
 import LoadingState from '../components/LoadingState.vue'
 import PiiEditor from '../components/PiiEditor.vue'
