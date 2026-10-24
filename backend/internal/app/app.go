@@ -23,6 +23,7 @@ import (
 	"github.com/agentrq/sql-mcp/backend/internal/controller/mcpserver"
 	"github.com/agentrq/sql-mcp/backend/internal/handler/admin"
 	"github.com/agentrq/sql-mcp/backend/internal/handler/api"
+	"github.com/agentrq/sql-mcp/backend/internal/handler/clilogin"
 	"github.com/agentrq/sql-mcp/backend/internal/handler/live"
 	mcphandler "github.com/agentrq/sql-mcp/backend/internal/handler/mcp"
 	"github.com/agentrq/sql-mcp/backend/internal/repository"
@@ -135,6 +136,7 @@ func New(cfg config.Config, deps Deps) (http.Handler, error) {
 		MCP:     mcpserver.NewHandler(ctrl, Version),
 		BaseURL: cfg.BaseURL,
 	})
+	clilogin.Register(clilogin.Params{Mux: mux, Accounts: ctrl, Tokens: tokens, BaseURL: cfg.BaseURL})
 	live.Register(live.Params{Mux: mux, Watcher: ctrl, Tokens: tokens})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

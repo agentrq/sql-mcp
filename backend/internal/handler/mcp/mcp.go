@@ -302,7 +302,9 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 	var userID string
 	switch r.PostForm.Get("grant_type") {
 	case "authorization_code":
-		userID, err = h.tokens.RedeemCode(r.PostForm.Get("code"), idStr, r.PostForm.Get("client_id"), r.PostForm.Get("redirect_uri"), r.PostForm.Get("code_verifier"))
+		var grant auth.Grant
+		grant, err = h.tokens.RedeemCode(r.PostForm.Get("code"), idStr, r.PostForm.Get("client_id"), r.PostForm.Get("redirect_uri"), r.PostForm.Get("code_verifier"))
+		userID = grant.UserID
 	case "refresh_token":
 		userID, err = h.tokens.ValidateMCPRefreshToken(r.PostForm.Get("refresh_token"), idStr)
 	default:

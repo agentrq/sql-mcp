@@ -5,6 +5,11 @@ authenticates with the HttpOnly `at` cookie (24h access JWT); `rt` (refresh JWT,
 2 days idle) is scoped to `/api/v1/auth/refresh`. A 401 from any route means
 "call `POST /auth/refresh` once, then replay".
 
+The `sqlmcp` CLI sends `Authorization: Bearer <token>` instead, with a token
+from [its own sign-in](#cli-sign-in). That token opens only the routes marked
+**CLI** below, and only the databases it was granted: any other database is
+404, like someone else's, and any other route is 403.
+
 Errors always look like:
 
 ```json
@@ -25,7 +30,7 @@ Errors always look like:
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/auth/user` | `{ "id", "email", "name", "picture" }` |
+| GET | `/auth/user` **CLI** | `{ "id", "email", "name", "picture" }` |
 | POST | `/auth/logout` | 204 |
 
 ## Databases
@@ -48,19 +53,20 @@ A database is one connection a person registered; it gets its own MCP server.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| GET | `/drivers` | | `{ "drivers": [{ "id": "postgres", "name": "PostgreSQL", "available": true }, { "id": "mysql", "name": "MySQL", "available": true }] }` |
-| GET | `/databases` | | `{ "databases": [Database] }` |
+| GET | `/drivers` **CLI** | | `{ "drivers": [{ "id": "postgres", "name": "PostgreSQL", "available": true }, { "id": "mysql", "name": "MySQL", "available": true }] }` |
+| GET | `/databases` **CLI** | | `{ "databases": [Database] }` (for the CLI, only those it was granted) |
 | POST | `/databases` | `{ "database": { "name", "driver", "dsn" } }` | 201 `{ "database": Database }` (the DSN is tested before it is saved) |
 | POST | `/databases/test` | `{ "database": { "driver", "dsn" } }` | `{ "ok": true, "serverVersion": "PostgreSQL 17.2" }` or error |
-| GET | `/databases/:id` | | `{ "database": Database }` |
+| GET | `/databases/:id` **CLI** | | `{ "database": Database }` |
 | PUT | `/databases/:id` | `{ "database": { "name", "dsn" } }` — empty `dsn` keeps the stored one | `{ "database": Database }` |
 | DELETE | `/databases/:id` | | 204 |
-| GET | `/databases/:id/schema` | | `{ "tables": [{ "schema": "public", "name": "users", "columns": [{ "name": "email", "dataType": "text", "pii": true, "suggestedPii": true }] }] }` |
-| GET | `/databases/:id/pii` | | `{ "piiColumns": [{ "schema": "public", "table": "users", "column": "email" }] }` |
+| GET | `/databases/:id/schema` **CLI** | | `{ "tables": [{ "schema": "public", "name": "users", "columns": [{ "name": "email", "dataType": "text", "pii": true, "suggestedPii": true }] }] }` |
+| GET | `/databases/:id/pii` **CLI** | | `{ "piiColumns": [{ "schema": "public", "table": "users", "column": "email" }] }` |
+| POST | `/databases/:id/pii` **CLI** | `{ "piiColumns": [PiiColumn] }` (adds to the set and never removes; an empty `schema` is the engine's default) | `{ "piiColumns": [PiiColumn] }`, the whole set |
 | PUT | `/databases/:id/pii` | `{ "piiColumns": [PiiColumn] }` (replaces the whole set; an empty `schema` is the engine's default: `public`, or the DSN's database on MySQL) | `{ "piiColumns": [PiiColumn] }` |
 | PUT | `/databases/:id/pii/agent` | `{ "agentMarksPii": true }` (lets the MCP agent add PII columns with `markPii`; it can never remove one) | `{ "database": Database }` |
-| POST | `/databases/:id/query` | `{ "sql": "select ..." }` | `{ "columns": ["id"], "rows": [[1]], "rowCount": 1, "truncated": false }`; a query touching a PII column is 422 with the reason |
-| GET | `/databases/:id/queries?limit=50` | | `{ "queries": [{ "id", "source": "mcp" \| "console", "sql", "status": "ok" \| "rejected" \| "error", "reason", "rowCount", "resultUrl", "durationMs", "createdAt" }] }` |
+| POST | `/databases/:id/query` **CLI** | `{ "sql": "select ..." }` | `{ "columns": ["id"], "rows": [[1]], "rowCount": 1, "truncated": false }`; a query touching a PII column is 422 with the reason |
+| GET | `/databases/:id/queries?limit=50` **CLI** | | `{ "queries": [{ "id", "source": "mcp" \| "console" \| "cli", "sql", "status": "ok" \| "rejected" \| "error", "reason", "rowCount", "resultUrl", "durationMs", "createdAt" }] }` |
 | GET | `/databases/:id/queries/stream` | | `text/event-stream`: one `event: query` per query as it is recorded, `data` a query log entry as above and `id` its id; `: ping` comments every 25 s. 401 without a session, 404 for someone else's database |
 
 The query stream ends when the session's `at` cookie expires or the database
@@ -70,6 +76,28 @@ rather than holding them up, and each (re)connect should reload
 `/queries` to catch up. It is served by the standard mux, not Fiber (whose
 adaptor buffers the whole response), and only by the process that ran the
 query: run one replica, or the stream shows only that replica's queries.
+
+A console or CLI query is never stored on tmphost: every row up to
+`QUERY_MAX_ROWS` comes back in the answer.
+
+## CLI sign-in
+
+The `sqlmcp` CLI signs in with OAuth 2.1, PKCE (S256) and a loopback
+redirect (RFC 8252), as the built-in public client `sqlmcp-cli`: no secret
+and no registration. These routes are on the root, not under `/api/v1`.
+
+| Method | Path | |
+|---|---|---|
+| GET, POST | `/cli/oauth2/authorize?response_type=code&client_id=sqlmcp-cli&redirect_uri=http://127.0.0.1:<port>/callback&code_challenge=…&code_challenge_method=S256&state=…` | The consent page, server-rendered like the MCP one, for the signed-in person (else 302 to `/login`). It lists their databases with checkboxes; Allow needs at least one ticked and redirects to `redirect_uri` with `code` and `state`. The redirect must be `http://127.0.0.1`, `http://[::1]` or `http://localhost`, on any port, path `/callback`. |
+| POST | `/cli/oauth2/token` | Form `grant_type=authorization_code` (`code`, `client_id`, `redirect_uri`, `code_verifier`) or `grant_type=refresh_token` (`refresh_token`). Answers `{ "access_token", "refresh_token", "token_type": "Bearer", "expires_in": 3600, "databases": ["<id>", …] }`; errors are `{ "error": "invalid_grant", "error_description" }`. |
+
+The code and both tokens carry the IDs of the databases picked; the access
+token (audience `actor:cli`) lasts an hour, the refresh token (`refresh:cli`)
+30 days. Each refresh issues a new refresh token; like every grant here they
+are stateless, so an older one stays valid until it expires. A refresh fails once the person is gone
+or off the allowlist. The code is bound to the resource `cli:`, which no
+database ID can be, so it can never be redeemed at an MCP token endpoint.
+Logging in again is how the CLI picks other databases.
 
 ## Settings
 

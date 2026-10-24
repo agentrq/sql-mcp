@@ -19,8 +19,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/agentrq/sql-mcp/backend/internal/app"
 	"github.com/agentrq/sql-mcp/backend/internal/config"
@@ -51,11 +53,12 @@ type stack struct {
 	driver  *testutil.Driver
 	tmphost *testutil.Tmphost
 	public  string
+	dbPath  string
 }
 
 func newStack(t *testing.T) *stack {
 	t.Helper()
-	s := &stack{t: t, driver: &testutil.Driver{Rows: 3}, tmphost: testutil.NewTmphost(t), public: t.TempDir()}
+	s := &stack{t: t, driver: &testutil.Driver{Rows: 3}, tmphost: testutil.NewTmphost(t), public: t.TempDir(), dbPath: filepath.Join(t.TempDir(), "nested", "app.db")}
 	var h http.Handler
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) }))
 	t.Cleanup(s.srv.Close)
@@ -68,7 +71,7 @@ func newStack(t *testing.T) *stack {
 		RootToken:        rootToken,
 		RootEmail:        "root@sqlmcp.local",
 		AppDBDriver:      "sqlite",
-		AppDBDSN:         filepath.Join(t.TempDir(), "nested", "app.db"),
+		AppDBDSN:         s.dbPath,
 		PublicDir:        s.public,
 		QueryMaxRows:     100,
 		QueryInlineRows:  5,
@@ -452,6 +455,132 @@ func TestMCPOAuthFlow(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, s.do(c, "DELETE", "/api/v1/databases/"+id, nil).status)
 	assert.Equal(t, http.StatusNotFound, s.do(api, "POST", mcpURL, initBody, "Authorization", "Bearer "+access).status)
 	assert.Equal(t, http.StatusBadRequest, token(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}}).status)
+}
+
+func TestCLILogin(t *testing.T) {
+	s := newStack(t)
+	c := s.rootSession()
+	shop := s.createDB(c)
+	res := s.do(c, "POST", "/api/v1/databases", map[string]any{"database": map[string]string{"name": "crm", "driver": "postgres", "dsn": testutil.GoodDSN}})
+	require.Equal(t, http.StatusCreated, res.status, res.body)
+	crm := res.json(t)["database"].(map[string]any)["id"].(string)
+	api := s.browser()
+	const redirect = "http://127.0.0.1:41234/callback"
+
+	verifier, challenge := pkce()
+	authorize := func(extra url.Values) string {
+		q := url.Values{"client_id": {auth.CLIClientID}, "redirect_uri": {redirect}, "response_type": {"code"},
+			"code_challenge": {challenge}, "code_challenge_method": {"S256"}, "state": {"st"}}
+		for k, v := range extra {
+			q[k] = v
+		}
+		return "/cli/oauth2/authorize?" + q.Encode()
+	}
+	assert.Equal(t, http.StatusBadRequest, s.do(c, "GET", authorize(url.Values{"client_id": {"other"}}), nil).status)
+	for _, bad := range []string{"https://evil.example/callback", "http://127.0.0.1:41234/other"} {
+		assert.Equal(t, http.StatusBadRequest, s.do(c, "GET", authorize(url.Values{"redirect_uri": {bad}}), nil).status, bad)
+	}
+	res = s.do(c, "GET", authorize(url.Values{"response_type": {"token"}}), nil)
+	assert.Contains(t, res.header.Get("Location"), "error=unsupported_response_type")
+	res = s.do(c, "GET", authorize(url.Values{"code_challenge": {""}}), nil)
+	assert.Contains(t, res.header.Get("Location"), "error=invalid_request")
+	res = s.do(api, "GET", authorize(nil), nil)
+	assert.True(t, strings.HasPrefix(res.header.Get("Location"), s.srv.URL+"/login?redirect_url="), "signed out: to the login page")
+
+	// The person picks shop and not crm.
+	res = s.do(c, "GET", authorize(nil), nil)
+	require.Equal(t, http.StatusOK, res.status, res.body)
+	assert.Contains(t, res.body, `value="`+shop+`"`)
+	assert.Contains(t, res.body, `value="`+crm+`"`)
+	consent := regexp.MustCompile(`name="consent" value="([^"]+)"`).FindStringSubmatch(res.body)
+	require.Len(t, consent, 2)
+	res = s.do(c, "POST", authorize(nil), url.Values{"consent": {consent[1]}, "decision": {"allow"}, "db": {shop}})
+	require.Equal(t, http.StatusFound, res.status, res.body)
+	back, _ := url.Parse(res.header.Get("Location"))
+	assert.Equal(t, "127.0.0.1:41234", back.Host)
+	code := back.Query().Get("code")
+	require.NotEmpty(t, code)
+
+	token := func(form url.Values) response { return s.do(api, "POST", "/cli/oauth2/token", form) }
+	assert.Equal(t, "unsupported_grant_type", token(url.Values{"grant_type": {"password"}}).json(t)["error"])
+	assert.Equal(t, http.StatusBadRequest, s.do(api, "POST", "/cli/oauth2/token", "a=%zz", "Content-Type", "application/x-www-form-urlencoded").status)
+	codeForm := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {auth.CLIClientID}, "redirect_uri": {redirect}, "code_verifier": {"wrong"}}
+	assert.Equal(t, "invalid_grant", token(codeForm).json(t)["error"])
+	codeForm.Set("code_verifier", verifier)
+	res = token(codeForm)
+	require.Equal(t, http.StatusOK, res.status, res.body)
+	tokens := res.json(t)
+	assert.Equal(t, []any{shop}, tokens["databases"])
+	bearer := []string{"Authorization", "Bearer " + tokens["access_token"].(string)}
+
+	// The CLI sees shop alone, as if crm were someone else's.
+	assert.Contains(t, s.do(api, "GET", "/api/v1/auth/user", nil, bearer...).body, "root@sqlmcp.local")
+	list := s.do(api, "GET", "/api/v1/databases", nil, bearer...).json(t)["databases"].([]any)
+	require.Len(t, list, 1)
+	assert.Equal(t, shop, list[0].(map[string]any)["id"])
+	assert.Equal(t, http.StatusOK, s.do(api, "GET", "/api/v1/databases/"+shop+"/schema", nil, bearer...).status)
+	for _, p := range []string{"/api/v1/databases/" + crm, "/api/v1/databases/" + crm + "/schema", "/api/v1/databases/" + crm + "/pii"} {
+		assert.Equal(t, http.StatusNotFound, s.do(api, "GET", p, nil, bearer...).status, p)
+	}
+
+	// It adds PII columns and never removes one, nor changes a database.
+	res = s.do(api, "POST", "/api/v1/databases/"+shop+"/pii", map[string]any{"piiColumns": []map[string]string{{"table": "users", "column": "email"}}}, bearer...)
+	require.Equal(t, http.StatusOK, res.status, res.body)
+	assert.Contains(t, res.body, `"column":"email"`)
+	assert.Equal(t, http.StatusBadRequest, s.do(api, "POST", "/api/v1/databases/"+shop+"/pii", "nope", bearer...).status)
+	assert.Equal(t, http.StatusBadRequest, s.do(api, "POST", "/api/v1/databases/"+shop+"/pii", map[string]any{"piiColumns": []map[string]string{{"table": "users"}}}, bearer...).status)
+	assert.Equal(t, http.StatusNotFound, s.do(api, "POST", "/api/v1/databases/"+shop+"x/pii", map[string]any{"piiColumns": []any{}}, bearer...).status)
+	for _, r := range [][2]string{
+		{"PUT", "/api/v1/databases/" + shop + "/pii"}, {"PUT", "/api/v1/databases/" + shop + "/pii/agent"},
+		{"PUT", "/api/v1/databases/" + shop}, {"DELETE", "/api/v1/databases/" + shop}, {"POST", "/api/v1/databases"},
+		{"GET", "/api/v1/settings/tmphost"}, {"POST", "/api/v1/auth/logout"},
+	} {
+		assert.Equal(t, http.StatusForbidden, s.do(api, r[0], r[1], map[string]any{"piiColumns": []any{}}, bearer...).status, r)
+	}
+	assert.Contains(t, s.do(c, "GET", "/api/v1/databases/"+shop+"/pii", nil).body, `"column":"email"`)
+
+	// A query comes back whole, past the inline limit, and is never stored
+	// on tmphost; the log says it came from the CLI.
+	s.driver.Rows = 8
+	res = s.do(api, "POST", "/api/v1/databases/"+shop+"/query", map[string]string{"sql": "select id from users"}, bearer...)
+	require.Equal(t, http.StatusOK, res.status, res.body)
+	assert.EqualValues(t, 8, res.json(t)["rowCount"])
+	assert.Len(t, res.json(t)["rows"], 8)
+	assert.Zero(t, s.tmphost.Uploads.Load())
+	res = s.do(api, "POST", "/api/v1/databases/"+shop+"/query", map[string]string{"sql": "select email from users"}, bearer...)
+	assert.Equal(t, http.StatusUnprocessableEntity, res.status, "the PII guard holds")
+	assert.Contains(t, s.do(api, "GET", "/api/v1/databases/"+shop+"/queries", nil, bearer...).body, `"source":"cli"`)
+
+	// Other tokens are not the CLI's, and the CLI's is not a session.
+	assert.Equal(t, http.StatusUnauthorized, s.do(api, "GET", "/api/v1/databases", nil, "Authorization", "Bearer "+tokens["refresh_token"].(string)).status)
+	assert.Equal(t, http.StatusUnauthorized, s.do(api, "GET", "/api/v1/databases", nil, "Authorization", "Bearer junk").status)
+
+	// Refreshing keeps the grant; an account that is gone cannot refresh.
+	res = token(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}})
+	require.Equal(t, http.StatusOK, res.status, res.body)
+	assert.Equal(t, []any{shop}, res.json(t)["databases"])
+	signer, err := auth.NewTokenService(testutil.Secret)
+	require.NoError(t, err)
+	_, ghost, err := signer.CreateCLITokens(auth.Grant{UserID: "AAAAAAAAAAB", Databases: []string{shop}})
+	require.NoError(t, err)
+	assert.Equal(t, "invalid_grant", token(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {ghost}}).json(t)["error"])
+}
+
+func TestCLIConsentNeedsDatabases(t *testing.T) {
+	s := newStack(t)
+	c := s.rootSession()
+	_, challenge := pkce()
+	q := url.Values{"client_id": {auth.CLIClientID}, "redirect_uri": {"http://localhost:5000/callback"}, "response_type": {"code"},
+		"code_challenge": {challenge}, "code_challenge_method": {"S256"}}
+	res := s.do(c, "GET", "/cli/oauth2/authorize?"+q.Encode(), nil)
+	assert.Contains(t, res.body, "You have no databases yet")
+
+	db, err := gorm.Open(sqlite.Open(s.dbPath), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("DROP TABLE databases").Error)
+	res = s.do(c, "GET", "/cli/oauth2/authorize?"+q.Encode(), nil)
+	assert.Equal(t, http.StatusInternalServerError, res.status)
+	assert.NotContains(t, res.body, "no such table")
 }
 
 func TestSPA(t *testing.T) {

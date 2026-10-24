@@ -53,11 +53,11 @@ func (f failingTokens) CreateConsentToken(userID string, c auth.Consent) (string
 	return f.Tokens.CreateConsentToken(userID, c)
 }
 
-func (f failingTokens) CreateCode(userID string, c auth.Consent) (string, error) {
+func (f failingTokens) CreateCode(userID string, c auth.Consent, databases []string) (string, error) {
 	if f.failCode {
 		return "", errors.New("boom")
 	}
-	return f.Tokens.CreateCode(userID, c)
+	return f.Tokens.CreateCode(userID, c, databases)
 }
 
 func serve(tokens Tokens, req Request, method string, form url.Values) *httptest.ResponseRecorder {
@@ -161,9 +161,62 @@ func TestServePostAllow(t *testing.T) {
 	assert.Equal(t, "/callback", loc.Path)
 	assert.Equal(t, "st", loc.Query().Get("state"))
 
-	user, err := tokens.RedeemCode(loc.Query().Get("code"), "db1", "c1", req.Consent.RedirectURI, "verifier")
+	grant, err := tokens.RedeemCode(loc.Query().Get("code"), "db1", "c1", req.Consent.RedirectURI, "verifier")
 	require.NoError(t, err)
-	assert.Equal(t, "u1", user)
+	assert.Equal(t, auth.Grant{UserID: "u1"}, grant)
+}
+
+func cliRequest() Request {
+	req := testRequest()
+	req.CLI, req.ClientName, req.Registered = true, "SQL MCP CLI", false
+	req.Consent.DatabaseID, req.Consent.ClientID = auth.CLIResource, auth.CLIClientID
+	req.Consent.RedirectURI = "http://127.0.0.1:5000/callback"
+	req.RegisteredRedirectURIs = []string{"http://127.0.0.1/callback"}
+	req.Databases = []Choice{{ID: "db1", Name: "shop <prod>"}, {ID: "db2", Name: "crm"}, {ID: "db3", Name: "hr"}}
+	return req
+}
+
+func TestServeCLIPage(t *testing.T) {
+	tokens := testTokens(t)
+	w := serve(tokens, cliRequest(), http.MethodGet, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "sqlmcp login")
+	assert.Contains(t, body, `value="db2"`)
+	assert.Contains(t, body, "shop &lt;prod&gt;")
+	assert.Contains(t, body, "can’t unmark")
+	assert.NotContains(t, body, "Unverified name")
+
+	req := cliRequest()
+	req.Databases = nil
+	w = serve(tokens, req, http.MethodGet, nil)
+	assert.Contains(t, w.Body.String(), `data-test="consent-no-databases"`)
+}
+
+func TestServeCLIAllowCarriesPickedDatabases(t *testing.T) {
+	tokens := testTokens(t)
+	req := cliRequest()
+	// db9 was never offered, so it is dropped; the order is the page's.
+	w := serve(tokens, req, http.MethodPost, url.Values{
+		"consent": {consentToken(t, tokens, req)}, "decision": {DecisionAllow}, "db": {"db3", "db9", "db1"},
+	})
+	require.Equal(t, http.StatusFound, w.Code)
+	loc, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	grant, err := tokens.RedeemCode(loc.Query().Get("code"), auth.CLIResource, auth.CLIClientID, "", "verifier")
+	require.NoError(t, err)
+	assert.Equal(t, auth.Grant{UserID: "u1", Databases: []string{"db1", "db3"}}, grant)
+}
+
+func TestServeCLIAllowNeedsADatabase(t *testing.T) {
+	tokens := testTokens(t)
+	req := cliRequest()
+	w := serve(tokens, req, http.MethodPost, url.Values{
+		"consent": {consentToken(t, tokens, req)}, "decision": {DecisionAllow}, "db": {"db9"},
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Pick at least one database.")
+	assert.Empty(t, w.Header().Get("Location"))
 }
 
 func TestServePostDeny(t *testing.T) {
@@ -345,6 +398,6 @@ func (w *errWriter) WriteHeader(int)           {}
 
 func TestRenderWriteFails(t *testing.T) {
 	w := &errWriter{header: http.Header{}}
-	render(w, newPage(testRequest(), "token"))
+	render(w, http.StatusOK, newPage(testRequest(), "token"))
 	assert.Equal(t, "no-store", w.header.Get("Cache-Control"))
 }

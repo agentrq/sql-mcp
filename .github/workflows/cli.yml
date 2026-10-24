@@ -1,0 +1,66 @@
+name: CLI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'cli/**'
+      - 'install.sh'
+      - '.github/workflows/cli.yml'
+  pull_request:
+    paths:
+      - 'cli/**'
+      - 'install.sh'
+      - '.github/workflows/cli.yml'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    name: Test and build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Build every release target
+        run: |
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            CGO_ENABLED=0 GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null .
+          done
+        working-directory: cli
+
+      - name: Test with coverage
+        run: go test -race -coverprofile=coverage.out ./...
+        working-directory: cli
+
+      - name: Enforce 100% coverage
+        run: |
+          go tool cover -func=coverage.out | awk '$3 != "100.0%"' | grep -v '^total:' && {
+            echo "::error::CLI coverage is below 100% for the functions above"
+            exit 1
+          }
+          go tool cover -func=coverage.out | tail -1
+        working-directory: cli
+
+      - name: golangci-lint
+        # The same pinned version and rules as the backend's.
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          working-directory: cli
+
+      - name: Check install.sh
+        run: sh -n install.sh && shellcheck install.sh

@@ -1,11 +1,14 @@
 // Package api is the REST API under /api/v1, on Fiber. The browser
 // authenticates with the HttpOnly `at` cookie; `rt`, scoped to the refresh
-// route, renews it.
+// route, renews it. The sqlmcp CLI sends its own token as a Bearer, which
+// opens only the routes registered with cli, and only the databases it was
+// granted.
 package api
 
 import (
 	"errors"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +32,7 @@ const (
 	refreshCookie     = "rt"
 	tmphostFlowCookie = "tmphost_flow"
 	localUserID       = "userID"
+	localCLIGrant     = "cliGrant"
 )
 
 // Params is what the API needs.
@@ -75,27 +79,31 @@ func Register(p Params) {
 
 	r.Use(h.requireSession)
 
-	r.Get("/auth/user", h.user)
-	r.Post("/auth/logout", h.logout)
+	// Every route is either the browser's (web) or also the CLI's (cli).
+	// The CLI reads, queries and adds PII columns; it never removes one or
+	// changes a database.
+	r.Get("/auth/user", h.cli(h.user))
+	r.Post("/auth/logout", h.web(h.logout))
 
-	r.Get("/drivers", h.drivers)
-	r.Get("/databases", h.listDatabases)
-	r.Post("/databases", h.createDatabase)
-	r.Post("/databases/test", h.testConnection)
-	r.Get("/databases/:id", h.getDatabase)
-	r.Put("/databases/:id", h.updateDatabase)
-	r.Delete("/databases/:id", h.deleteDatabase)
-	r.Get("/databases/:id/schema", h.schema)
-	r.Get("/databases/:id/pii", h.getPII)
-	r.Put("/databases/:id/pii", h.setPII)
-	r.Put("/databases/:id/pii/agent", h.setAgentPII)
-	r.Post("/databases/:id/query", h.query)
-	r.Get("/databases/:id/queries", h.queries)
+	r.Get("/drivers", h.cli(h.drivers))
+	r.Get("/databases", h.cli(h.listDatabases))
+	r.Post("/databases", h.web(h.createDatabase))
+	r.Post("/databases/test", h.web(h.testConnection))
+	r.Get("/databases/:id", h.cli(h.getDatabase))
+	r.Put("/databases/:id", h.web(h.updateDatabase))
+	r.Delete("/databases/:id", h.web(h.deleteDatabase))
+	r.Get("/databases/:id/schema", h.cli(h.schema))
+	r.Get("/databases/:id/pii", h.cli(h.getPII))
+	r.Post("/databases/:id/pii", h.cli(h.addPII))
+	r.Put("/databases/:id/pii", h.web(h.setPII))
+	r.Put("/databases/:id/pii/agent", h.web(h.setAgentPII))
+	r.Post("/databases/:id/query", h.cli(h.query))
+	r.Get("/databases/:id/queries", h.cli(h.queries))
 
-	r.Get("/settings/tmphost", h.tmphostStatus)
-	r.Get("/settings/tmphost/connect", h.tmphostConnect)
-	r.Get("/settings/tmphost/callback", h.tmphostCallback)
-	r.Delete("/settings/tmphost", h.tmphostDisconnect)
+	r.Get("/settings/tmphost", h.web(h.tmphostStatus))
+	r.Get("/settings/tmphost/connect", h.web(h.tmphostConnect))
+	r.Get("/settings/tmphost/callback", h.web(h.tmphostCallback))
+	r.Delete("/settings/tmphost", h.web(h.tmphostDisconnect))
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────
@@ -163,6 +171,16 @@ func (h *handler) clearSession(c fiber.Ctx) {
 }
 
 func (h *handler) requireSession(c fiber.Ctx) error {
+	if token, ok := strings.CutPrefix(c.Get(fiber.HeaderAuthorization), "Bearer "); ok {
+		grant, err := h.tokens.ValidateCLIAccessToken(token)
+		id := crud.ParseID(grant.UserID)
+		if err != nil || id == 0 {
+			return fail(c, fiber.StatusUnauthorized, "unauthorized")
+		}
+		c.Locals(localUserID, id)
+		c.Locals(localCLIGrant, &grant)
+		return c.Next()
+	}
 	claims, err := h.tokens.ValidateAccessToken(c.Cookies(accessCookie))
 	if err != nil {
 		return fail(c, fiber.StatusUnauthorized, "unauthorized")
@@ -173,6 +191,40 @@ func (h *handler) requireSession(c fiber.Ctx) error {
 	}
 	c.Locals(localUserID, id)
 	return c.Next()
+}
+
+// cliGrant is the CLI's grant, or nil for the browser.
+func cliGrant(c fiber.Ctx) *auth.Grant {
+	g, _ := c.Locals(localCLIGrant).(*auth.Grant)
+	return g
+}
+
+// granted reports whether the request may see database id: the browser
+// sees every database of its person, the CLI only those it was granted.
+func granted(c fiber.Ctx, id string) bool {
+	g := cliGrant(c)
+	return g == nil || slices.Contains(g.Databases, id)
+}
+
+// web keeps a route to the browser.
+func (h *handler) web(next fiber.Handler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if cliGrant(c) != nil {
+			return fail(c, fiber.StatusForbidden, "not available to the CLI; use the web app")
+		}
+		return next(c)
+	}
+}
+
+// cli opens a route to the CLI too. A database it was not granted is not
+// found, like someone else's.
+func (h *handler) cli(next fiber.Handler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if id := c.Params("id"); id != "" && !granted(c, id) {
+			return fail(c, fiber.StatusNotFound, "not found")
+		}
+		return next(c)
+	}
 }
 
 func userID(c fiber.Ctx) int64 {
@@ -312,6 +364,7 @@ func (h *handler) listDatabases(c fiber.Ctx) error {
 	if err != nil {
 		return respondErr(c, err)
 	}
+	dbs = slices.DeleteFunc(dbs, func(d entity.Database) bool { return !granted(c, d.ID) })
 	return c.JSON(view.FromDatabases(dbs))
 }
 
@@ -406,13 +459,30 @@ func (h *handler) setPII(c fiber.Ctx) error {
 	return c.JSON(view.FromPIIColumns(cols))
 }
 
+func (h *handler) addPII(c fiber.Ctx) error {
+	var rq view.PIIColumnsRequest
+	if err := c.Bind().JSON(&rq); err != nil {
+		return badPayload(c)
+	}
+	cols, err := h.crud.AddPII(c.Context(), userID(c), dbID(c), view.ToPIIColumns(rq.PIIColumns))
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(view.FromPIIColumns(cols))
+}
+
 func (h *handler) query(c fiber.Ctx) error {
 	var rq view.QueryRequest
 	if err := c.Bind().JSON(&rq); err != nil {
 		return badPayload(c)
 	}
+	// Neither source stores a result on tmphost: it comes back whole.
+	source := model.SourceConsole
+	if cliGrant(c) != nil {
+		source = model.SourceCLI
+	}
 	res, err := h.crud.RunQuery(c.Context(), crud.QueryRequest{
-		UserID: userID(c), DatabaseID: dbID(c), SQL: rq.SQL, Source: model.SourceConsole,
+		UserID: userID(c), DatabaseID: dbID(c), SQL: rq.SQL, Source: source,
 	})
 	if err != nil {
 		return respondErr(c, err)

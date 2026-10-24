@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -198,6 +199,64 @@ func TestSchemaAndPII(t *testing.T) {
 	_, err = env.Ctrl.Schema(ctx, alice, id)
 	var failed *entity.QueryFailedError
 	assert.ErrorAs(t, err, &failed)
+}
+
+func TestAddPIIOnlyAdds(t *testing.T) {
+	env := testutil.New(t)
+	alice := signIn(t, env, "alice@example.com")
+	bob := signIn(t, env, "bob@example.com")
+	id := newDB(t, env, alice)
+
+	_, err := env.Ctrl.SetPII(ctx, alice, id, []entity.PIIColumn{{Table: "orders", Column: "total"}})
+	require.NoError(t, err)
+	cols, err := env.Ctrl.AddPII(ctx, alice, id, []entity.PIIColumn{
+		{Table: "users", Column: "email"},
+		{Schema: "PUBLIC", Table: "Orders", Column: "TOTAL"}, // already marked
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []entity.PIIColumn{
+		{Schema: "public", Table: "orders", Column: "total"},
+		{Schema: "public", Table: "users", Column: "email"},
+	}, cols)
+
+	// Nothing new: the set is returned as it is.
+	cols, err = env.Ctrl.AddPII(ctx, alice, id, nil)
+	require.NoError(t, err)
+	assert.Len(t, cols, 2)
+
+	_, err = env.Ctrl.AddPII(ctx, bob, id, []entity.PIIColumn{{Table: "users", Column: "id"}})
+	assert.ErrorIs(t, err, entity.ErrNotFound)
+	_, err = env.Ctrl.AddPII(ctx, alice, id, []entity.PIIColumn{{Table: "users"}})
+	var invalid *entity.InvalidError
+	assert.ErrorAs(t, err, &invalid)
+
+	db, err := gorm.Open(sqlite.Open(env.DBPath), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("CREATE TRIGGER no_pii BEFORE INSERT ON pii_columns BEGIN SELECT RAISE(FAIL, 'read-only'); END").Error)
+	_, err = env.Ctrl.AddPII(ctx, alice, id, []entity.PIIColumn{{Table: "users", Column: "id"}})
+	assert.ErrorContains(t, err, "read-only")
+	_, err = env.Ctrl.SetPII(ctx, alice, id, []entity.PIIColumn{{Table: "users", Column: "id"}})
+	assert.ErrorContains(t, err, "read-only")
+	require.NoError(t, db.Exec("DROP TABLE pii_columns").Error)
+	_, err = env.Ctrl.AddPII(ctx, alice, id, []entity.PIIColumn{{Table: "users", Column: "id"}})
+	assert.Error(t, err)
+}
+
+func TestAddPIIKeepsTheCap(t *testing.T) {
+	env := testutil.New(t)
+	alice := signIn(t, env, "alice@example.com")
+	id := newDB(t, env, alice)
+
+	full := make([]entity.PIIColumn, 10000)
+	for i := range full {
+		full[i] = entity.PIIColumn{Table: "t", Column: fmt.Sprintf("c%d", i)}
+	}
+	_, err := env.Ctrl.SetPII(ctx, alice, id, full)
+	require.NoError(t, err)
+	_, err = env.Ctrl.AddPII(ctx, alice, id, []entity.PIIColumn{{Table: "t", Column: "c0"}})
+	require.NoError(t, err, "a column already marked does not count")
+	_, err = env.Ctrl.AddPII(ctx, alice, id, []entity.PIIColumn{{Table: "t", Column: "one-more"}})
+	assert.ErrorContains(t, err, "too many PII columns")
 }
 
 func TestAgentMarksPII(t *testing.T) {

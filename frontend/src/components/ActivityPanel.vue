@@ -87,7 +87,7 @@ onBeforeUnmount(stream.stop)
       <div v-else-if="error" class="p-4 rounded-xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm text-red-700 dark:text-red-300">{{ error }}</div>
       <div v-else-if="!queries.length" data-test="empty" class="py-16 text-center border border-dashed border-gray-200 dark:border-zinc-800 rounded-xl">
         <p class="text-sm font-bold text-gray-900 dark:text-zinc-100">No queries yet</p>
-        <p class="text-xs text-gray-500 dark:text-zinc-400 mt-1">Queries from MCP clients and the console show up here as they run.</p>
+        <p class="text-xs text-gray-500 dark:text-zinc-400 mt-1">Queries from MCP clients, the console and the sqlmcp CLI show up here as they run.</p>
       </div>
 
       <div v-else class="rounded-xl border border-gray-200 dark:border-zinc-800 overflow-auto">

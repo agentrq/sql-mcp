@@ -364,6 +364,54 @@ func (c *Controller) SetPII(ctx context.Context, userID, id int64, columns []ent
 	if err != nil {
 		return nil, err
 	}
+	rows, err := piiRows(d, dsn, columns)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.repo.ReplacePIIColumns(ctx, id, rows); err != nil {
+		return nil, err
+	}
+	return c.ListPII(ctx, userID, id)
+}
+
+// AddPII adds columns to a database's PII set and returns the whole set. It
+// never removes one, which is why the CLI may call it and not SetPII.
+func (c *Controller) AddPII(ctx context.Context, userID, id int64, columns []entity.PIIColumn) ([]entity.PIIColumn, error) {
+	_, d, dsn, err := c.open(ctx, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := piiRows(d, dsn, columns)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := c.repo.ListPIIColumns(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	marked := map[string]bool{}
+	for _, p := range existing {
+		marked[piiKey(p.Schema, p.Table, p.Column)] = true
+	}
+	var add []model.PIIColumn
+	for _, r := range rows {
+		if !marked[piiKey(r.Schema, r.Table, r.Column)] {
+			add = append(add, r)
+		}
+	}
+	if len(existing)+len(add) > maxPIIColumns {
+		return nil, entity.Invalid("too many PII columns")
+	}
+	if len(add) > 0 {
+		if err := c.repo.AddPIIColumns(ctx, id, add); err != nil {
+			return nil, err
+		}
+	}
+	return c.ListPII(ctx, userID, id)
+}
+
+// piiRows checks PII columns and puts each in its schema, dropping repeats.
+func piiRows(d dbdriver.Driver, dsn string, columns []entity.PIIColumn) ([]model.PIIColumn, error) {
 	if len(columns) > maxPIIColumns {
 		return nil, entity.Invalid("too many PII columns")
 	}
@@ -388,10 +436,7 @@ func (c *Controller) SetPII(ctx context.Context, userID, id int64, columns []ent
 		seen[key] = true
 		rows = append(rows, model.PIIColumn{Schema: schema, Table: table, Column: column})
 	}
-	if err := c.repo.ReplacePIIColumns(ctx, id, rows); err != nil {
-		return nil, err
-	}
-	return c.ListPII(ctx, userID, id)
+	return rows, nil
 }
 
 // SetAgentMarksPII lets, or stops, a database's MCP agent adding PII columns.

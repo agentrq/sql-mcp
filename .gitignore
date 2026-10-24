@@ -7,6 +7,9 @@ backend/public/
 backend/bin/
 backend/coverage.out
 
+bin/
+cli/coverage.out
+
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/

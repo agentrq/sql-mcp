@@ -12,6 +12,9 @@ source. Keep each note to a line or two: the rule, and what breaks without it.
   the web app (`/`).
 - `frontend/`: Vue 3, pinia, vue-router and Tailwind v4, built with Vite into
   `frontend/dist`, which `make build` copies to `backend/public`.
+- `cli/`: Go module `github.com/agentrq/sql-mcp/cli`, the `sqlmcp` CLI. It
+  talks to the server's REST API only, never to a database. Released by
+  `release.yml` on `v*` tags; `install.sh`/`install.ps1` fetch those assets.
 - `docs/API.md`: the REST contract. Change it in the same change as the code.
 
 Backend layers, top to bottom: `handler/*` (HTTP only), `controller/crud`
@@ -51,6 +54,18 @@ app state). A handler never calls the repository directly.
   `agentMarksPii`). Never give MCP a way to unmark; that would let an agent
   lift its own guard. The editor saves its diff onto the server's latest set,
   so a save doesn't drop what the agent marked meanwhile.
+- **The CLI's token opens an allowlist of routes** (`handler/api`: every
+  route is wrapped in `h.cli` or `h.web`). It reads, queries and adds PII
+  (`POST /pii`, `crud.AddPII`); it never removes PII or changes a database.
+  A new route must pick one wrapper; the CLI gets nothing by default.
+- **A CLI login is bound to the databases picked on its consent page**: the
+  code and tokens (`actor:cli`, `refresh:cli`) carry their IDs, and any
+  other ID is *not found*. Its code is bound to `auth.CLIResource` (`cli:`,
+  no base62), so it is never redeemable for an MCP server.
+- **The CLI seals its saved tokens to the machine** (`cli/internal/machine`):
+  AES-GCM, key from HKDF(machine ID, OS user), server URL as associated data.
+  A machine without an ID gets a random one in the cache dir, never beside
+  the config. Never store a token in the clear.
 - **OAuth registrations, consents and codes are signed tokens, not rows.**
   Deleting a database revokes its grants because every token is checked
   against the database's current owner.
@@ -88,6 +103,9 @@ app state). A handler never calls the repository directly.
 - Cover each change with tests on both sides. The target is 100% unit
   coverage of new lines. `internal/testutil` has a fake engine and a fake
   tmphost, and `internal/app/app_test.go` drives the whole stack over HTTP.
+- The CLI is held to 100% coverage (`cli.yml`, `make test-cli`); its tests
+  run against a fake server in `internal/cmd/helpers_test.go`, so a change
+  to an API shape the CLI reads must change that fake too.
 - CI (`.github/workflows`) fails a PR on any added Go line no test runs
   (`scripts/coverage.sh`), on a backend total below `COVER_MIN`, and on any
   golangci-lint or ESLint finding, warnings included. Run `make lint` and

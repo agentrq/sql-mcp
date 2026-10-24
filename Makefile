@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend build test test-backend test-frontend check-case cover lint fmt stop
+.PHONY: dev backend frontend build cli test test-backend test-frontend test-cli check-case cover lint lint-cli fmt stop
 
 # The backend, then the Vite dev server on :5173 once the backend is up.
 # A missing backend/.env is created with development secrets (scripts/dev-env.sh).
@@ -19,7 +19,12 @@ build:
 	@cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/sql-mcp ./cmd/server
 	@echo "built backend/bin/sql-mcp; run it from backend/ (it serves ./public)"
 
-test: check-case test-backend test-frontend
+# The sqlmcp CLI (cli/, its own module): bin/sqlmcp.
+cli:
+	@cd cli && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ../bin/sqlmcp .
+	@echo "built bin/sqlmcp"
+
+test: check-case test-backend test-frontend test-cli
 
 # Paths that differ only by case break checkouts on macOS and Windows.
 check-case:
@@ -33,6 +38,10 @@ test-backend:
 test-frontend:
 	@cd frontend && npm test
 
+# CI requires 100% of the CLI covered.
+test-cli:
+	@cd cli && go vet ./... && go test -race -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1
+
 # What CI enforces: the backend coverage floor (and, with BASE=<ref>, 100% of
 # lines added since it), then the frontend thresholds in vitest.config.js.
 # CI's floor (backend.yml) is higher because it runs the drivers' tests too.
@@ -42,12 +51,16 @@ cover:
 	@./scripts/coverage.sh backend/coverage.out $(COVER_MIN) $(BASE)
 	@cd frontend && npm run test:coverage
 
-lint:
+lint: lint-cli
 	@cd backend && golangci-lint run ./...
 	@cd frontend && npm run lint
 
+lint-cli:
+	@cd cli && golangci-lint run ./...
+
 fmt:
 	@cd backend && gofmt -w .
+	@cd cli && gofmt -w .
 
 stop:
 	-@lsof -ti:3000,5173 | xargs kill 2>/dev/null || true
