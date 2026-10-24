@@ -122,6 +122,25 @@ The MCP server has one tool, `sql`, which takes `{action, payload}`:
 The **Query** tab runs the same checks from the browser, and **Activity** logs
 every query with whether it ran, was rejected or failed.
 
+## Query from the terminal
+
+The `sqlmcp` CLI runs the same tool from a terminal, against the server:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tmphost/sql-mcp/main/install.sh | sh   # Windows: install.ps1
+sqlmcp login --server https://sql.example.com     # pick the databases in the browser
+sqlmcp tables shop
+sqlmcp query shop "select id, total from orders limit 10"
+sqlmcp pii add shop users.phone
+```
+
+On the consent page you tick the databases this computer may open; the CLI
+sees no other. Its tokens are saved sealed with a key derived from the
+machine's ID and the OS user, so the config file opens nowhere else. Results
+come back whole to the terminal and are never stored on tmphost. The CLI can
+mark PII columns but never unmark one, nor change a database. See
+[`cli/README.md`](cli/README.md).
+
 ## What the PII guard does, and what it doesn't
 
 Each query is parsed by a parser for its engine: PostgreSQL's own
@@ -180,8 +199,9 @@ GRANT SELECT (id, created_at, country) ON shop.users TO 'sqlmcp'@'%';
 ## Develop
 
 ```sh
-make test       # go vet + go test, and vitest
-make lint       # golangci-lint (backend/.golangci.yml) and ESLint
+make test       # go vet + go test (backend and CLI), and vitest
+make lint       # golangci-lint (backend/ and cli/) and ESLint
+make cli        # bin/sqlmcp
 make cover      # the coverage gates CI enforces; BASE=main also checks new lines
 ```
 
@@ -205,15 +225,18 @@ SQLMCP_TEST_MARIADB_DSN='mysql://root:secret@127.0.0.1:53307/shop' make test-bac
 ### CI
 
 GitHub Actions run on every pull request: Backend (vet, race tests against
-Postgres, MySQL and MariaDB services, coverage), Frontend (vitest thresholds, build), Lint, a
-Docker build, and the case-collision check. Backend coverage may not fall below
+Postgres, MySQL and MariaDB services, coverage), Frontend (vitest thresholds, build), Lint, CLI
+(cross-builds, race tests at 100% coverage, lint, install.sh), a Docker build, and the
+case-collision check. Backend coverage may not fall below
 `COVER_MIN` in `.github/workflows/backend.yml` (95%; today 95.8%), and every Go line a pull
 request adds must be run by a test.
 
 A push to `main` publishes `<user>/sql-mcp:latest` and `:<sha>` to Docker Hub
 for `linux/amd64` and `linux/arm64`; a `v*` tag publishes `:<version>` and
 `:<major>.<minor>`. Both need the repository secrets `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN` (a Docker Hub access token with write scope).
+`DOCKERHUB_TOKEN` (a Docker Hub access token with write scope). A `v*` tag
+also attaches the CLI's `sqlmcp_<os>_<arch>` archives and `checksums.txt` to
+the GitHub release, which the install scripts download.
 
 The REST API is documented in [`docs/API.md`](docs/API.md). Read
 [`AGENTS.md`](AGENTS.md) before changing code.
