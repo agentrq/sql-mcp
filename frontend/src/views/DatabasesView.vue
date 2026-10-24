@@ -34,8 +34,8 @@
                      :class="[CARD, 'block p-5 hover:border-gray-300 dark:hover:border-zinc-700 transition-colors min-w-0']">
           <div class="flex items-start justify-between gap-3 mb-4">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-9 h-9 rounded-lg bg-gray-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
-                <AppLogo class="w-5 h-5 text-gray-700 dark:text-zinc-300" />
+              <div class="w-9 h-9 rounded-lg bg-white border border-gray-200 dark:border-zinc-700 flex items-center justify-center shrink-0 text-gray-700">
+                <DriverIcon :driver="db.driver" class="w-6 h-6" />
               </div>
               <div class="min-w-0">
                 <h3 class="text-sm font-bold text-gray-900 dark:text-zinc-100 truncate">{{ db.name }}</h3>
@@ -62,6 +62,7 @@
 import { onMounted } from 'vue'
 import AppLogo from '../components/AppLogo.vue'
 import CopyField from '../components/CopyField.vue'
+import DriverIcon from '../components/DriverIcon.vue'
 import LoadingState from '../components/LoadingState.vue'
 import { useDatabaseStore } from '../stores/databaseStore'
 import { driverName } from '../utils/drivers'

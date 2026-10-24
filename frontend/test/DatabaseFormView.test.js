@@ -19,6 +19,11 @@ describe('DatabaseFormView', () => {
     expect(pg.attributes('aria-checked')).toBe('true')
     expect(ora.attributes('disabled')).toBeDefined()
     expect(ora.find('[data-test="coming-soon"]').text()).toBe('Coming soon')
+    // Each engine shows its own logo; one without falls back to the cylinder.
+    expect(pg.find('[data-test="driver-icon"]').attributes('alt')).toBe('PostgreSQL')
+    expect(wrapper.find('[data-test="driver-mysql"] [data-test="driver-icon"]').attributes('alt')).toBe('MySQL')
+    expect(ora.find('[data-test="driver-icon"]').exists()).toBe(false)
+    expect(ora.find('svg').exists()).toBe(true)
     await ora.trigger('click')
     expect(pg.attributes('aria-checked')).toBe('true')
     expect(wrapper.find('[data-test="dsn-format"]').text()).toContain('postgres://')
