@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/agentrq/sql-mcp/backend/internal/controller/crud"
 	"github.com/agentrq/sql-mcp/backend/internal/data/entity"
 	"github.com/agentrq/sql-mcp/backend/internal/data/model"
+	"github.com/agentrq/sql-mcp/backend/internal/service/dbdriver"
 	"github.com/agentrq/sql-mcp/backend/internal/testutil"
 )
 
@@ -196,6 +198,121 @@ func TestSchemaAndPII(t *testing.T) {
 	_, err = env.Ctrl.Schema(ctx, alice, id)
 	var failed *entity.QueryFailedError
 	assert.ErrorAs(t, err, &failed)
+}
+
+func TestAgentMarksPII(t *testing.T) {
+	env := testutil.New(t)
+	alice := signIn(t, env, "alice@example.com")
+	bob := signIn(t, env, "bob@example.com")
+	id := newDB(t, env, alice)
+
+	_, err := env.Ctrl.AgentMarkPII(ctx, alice, id, "", "users", []string{"email"})
+	assert.ErrorIs(t, err, crud.ErrAgentMarksPIIOff, "off until the owner turns it on")
+
+	_, err = env.Ctrl.SetAgentMarksPII(ctx, bob, id, true)
+	assert.ErrorIs(t, err, entity.ErrNotFound)
+	d, err := env.Ctrl.SetAgentMarksPII(ctx, alice, id, true)
+	require.NoError(t, err)
+	assert.True(t, d.AgentMarksPII)
+	owner, err := env.Ctrl.SystemDatabaseOwner(ctx, id)
+	require.NoError(t, err)
+	assert.True(t, owner.AgentMarksPII)
+
+	_, err = env.Ctrl.AgentMarkPII(ctx, bob, id, "", "users", []string{"email"})
+	assert.ErrorIs(t, err, entity.ErrNotFound)
+
+	_, err = env.Ctrl.SetPII(ctx, alice, id, []entity.PIIColumn{{Table: "orders", Column: "total"}})
+	require.NoError(t, err)
+
+	got, err := env.Ctrl.AgentMarkPII(ctx, alice, id, "", "USERS", []string{" EMAIL ", "email"})
+	require.NoError(t, err)
+	assert.Equal(t, &entity.PIIMarked{Table: "public.users", Marked: []string{"email"}, Already: []string{}}, got)
+	got, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "public", "orders", []string{"total", "id"})
+	require.NoError(t, err)
+	assert.Equal(t, &entity.PIIMarked{Table: "public.orders", Marked: []string{"id"}, Already: []string{"total"}}, got)
+	got, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "", "orders", []string{"total"})
+	require.NoError(t, err)
+	assert.Empty(t, got.Marked, "nothing new to mark")
+
+	cols, err := env.Ctrl.ListPII(ctx, alice, id)
+	require.NoError(t, err)
+	assert.Equal(t, []entity.PIIColumn{
+		{Schema: "public", Table: "orders", Column: "id"},
+		{Schema: "public", Table: "orders", Column: "total"},
+		{Schema: "public", Table: "users", Column: "email"},
+	}, cols, "the agent only adds; the owner's column stays")
+
+	env.Driver.Extra = []dbdriver.Table{{Schema: "billing", Name: "users", Kind: "table", Columns: []dbdriver.Column{{Name: "plan"}}}}
+	for name, tc := range map[string]struct {
+		schema, table string
+		columns       []string
+		want          string
+	}{
+		"no table":     {"", " ", []string{"email"}, "needs a table"},
+		"no columns":   {"", "users", nil, "at least one column"},
+		"unknown":      {"", "nope", []string{"email"}, "there is no table nope"},
+		"wrong schema": {"billing", "orders", []string{"id"}, "there is no table orders"},
+		"ambiguous":    {"", "users", []string{"email"}, "more than one schema"},
+		"no column":    {"public", "users", []string{"email", "ssn"}, "public.users has no column ssn"},
+	} {
+		_, err := env.Ctrl.AgentMarkPII(ctx, alice, id, tc.schema, tc.table, tc.columns)
+		var invalid *entity.InvalidError
+		require.ErrorAs(t, err, &invalid, name)
+		assert.Contains(t, invalid.Message, tc.want, name)
+	}
+	got, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "billing", "users", []string{"plan"})
+	require.NoError(t, err)
+	assert.Equal(t, "billing.users", got.Table)
+
+	env.Driver.SchemaErr = errors.New("permission denied")
+	_, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "", "orders", []string{"id"})
+	var failed *entity.QueryFailedError
+	assert.ErrorAs(t, err, &failed)
+	env.Driver.SchemaErr = nil
+
+	d, err = env.Ctrl.SetAgentMarksPII(ctx, alice, id, false)
+	require.NoError(t, err)
+	assert.False(t, d.AgentMarksPII)
+	_, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "", "users", []string{"id"})
+	assert.ErrorIs(t, err, crud.ErrAgentMarksPIIOff)
+}
+
+func TestAgentPIIWhenTheStoreFails(t *testing.T) {
+	env := testutil.New(t)
+	alice := signIn(t, env, "alice@example.com")
+	id := newDB(t, env, alice)
+	_, err := env.Ctrl.SetAgentMarksPII(ctx, alice, id, true)
+	require.NoError(t, err)
+
+	db, err := gorm.Open(sqlite.Open(env.DBPath), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("CREATE TRIGGER no_pii BEFORE INSERT ON pii_columns BEGIN SELECT RAISE(FAIL, 'read-only'); END").Error)
+	_, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "", "users", []string{"email"})
+	assert.ErrorContains(t, err, "read-only")
+
+	require.NoError(t, db.Exec("DROP TABLE pii_columns").Error)
+	_, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "", "users", []string{"email"})
+	assert.Error(t, err)
+
+	require.NoError(t, db.Exec("DROP TABLE databases").Error)
+	_, err = env.Ctrl.SetAgentMarksPII(ctx, alice, id, false)
+	assert.ErrorContains(t, err, "no such table")
+}
+
+func TestTooManyAgentPIIColumns(t *testing.T) {
+	env := testutil.New(t)
+	alice := signIn(t, env, "alice@example.com")
+	id := newDB(t, env, alice)
+	_, err := env.Ctrl.SetAgentMarksPII(ctx, alice, id, true)
+	require.NoError(t, err)
+	full := make([]entity.PIIColumn, 10000)
+	for i := range full {
+		full[i] = entity.PIIColumn{Table: "t", Column: "c" + strconv.Itoa(i)}
+	}
+	_, err = env.Ctrl.SetPII(ctx, alice, id, full)
+	require.NoError(t, err)
+	_, err = env.Ctrl.AgentMarkPII(ctx, alice, id, "", "users", []string{"email"})
+	assert.ErrorContains(t, err, "too many PII columns")
 }
 
 func TestRunQuery(t *testing.T) {

@@ -90,6 +90,7 @@ describe('api', () => {
       'GET /databases/x1/schema': { tables: [{ name: 't' }] },
       'GET /databases/x1/pii': { piiColumns: [{ schema: 'public', table: 't', column: 'c' }] },
       'PUT /databases/x1/pii': (init) => ({ piiColumns: JSON.parse(init.body).piiColumns }),
+      'PUT /databases/x1/pii/agent': (init) => ({ database: { ...db, ...JSON.parse(init.body) } }),
       'POST /databases/x1/query': { columns: ['id'], rows: [[1]], rowCount: 1, truncated: false },
       'GET /databases/x1/queries?limit=10': { queries: [{ id: 'q' }] },
     })
@@ -111,6 +112,8 @@ describe('api', () => {
     expect((await api.runQuery('x1', 'select 1')).rowCount).toBe(1)
     expect(bodyOf(f, 10)).toEqual({ sql: 'select 1' })
     expect(await api.fetchQueries('x1', 10)).toEqual([{ id: 'q' }])
+    expect(await api.setAgentMarksPii('x1', true)).toEqual({ ...db, agentMarksPii: true })
+    expect(bodyOf(f, 12)).toEqual({ agentMarksPii: true })
   })
 
   it('defaults missing lists to empty arrays', async () => {

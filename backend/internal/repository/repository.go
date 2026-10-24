@@ -125,6 +125,20 @@ func (r *Repository) UpdateDatabase(ctx context.Context, d *model.Database) erro
 	return nil
 }
 
+// SetAgentMarksPII turns on or off whether a database's MCP agent may add
+// PII columns.
+func (r *Repository) SetAgentMarksPII(ctx context.Context, userID, id int64, on bool) error {
+	res := r.db.WithContext(ctx).Model(&model.Database{}).Where("id = ? AND user_id = ?", id, userID).
+		Updates(map[string]any{"agent_marks_pii": on, "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteDatabase removes a database with its PII columns and query log.
 func (r *Repository) DeleteDatabase(ctx context.Context, userID, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -182,8 +196,22 @@ func (r *Repository) ReplacePIIColumns(ctx context.Context, databaseID int64, co
 		if len(columns) == 0 {
 			return nil
 		}
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&columns).Error
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&columns, piiBatch).Error
 	})
+}
+
+// piiBatch keeps one INSERT under SQLite's limit of 32766 bound variables
+// (six per column), so the largest PII set still saves.
+const piiBatch = 1000
+
+// AddPIIColumns adds columns to the database's PII set, keeping every column
+// already in it.
+func (r *Repository) AddPIIColumns(ctx context.Context, databaseID int64, columns []model.PIIColumn) error {
+	for i := range columns {
+		columns[i].ID = r.newID()
+		columns[i].DatabaseID = databaseID
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&columns, piiBatch).Error
 }
 
 // GetTmphost returns a person's tmphost connection.

@@ -24,6 +24,9 @@ type backend struct {
 	result    *entity.QueryResult
 	queryErr  error
 	last      crud.QueryRequest
+	marked    *entity.PIIMarked
+	markErr   error
+	markArgs  []any
 }
 
 func (b *backend) Schema(context.Context, int64, int64) ([]entity.SchemaTable, error) {
@@ -41,6 +44,11 @@ func (b *backend) Schema(context.Context, int64, int64) ([]entity.SchemaTable, e
 func (b *backend) RunQuery(_ context.Context, rq crud.QueryRequest) (*entity.QueryResult, error) {
 	b.last = rq
 	return b.result, b.queryErr
+}
+
+func (b *backend) AgentMarkPII(_ context.Context, userID, id int64, schema, table string, columns []string) (*entity.PIIMarked, error) {
+	b.markArgs = []any{userID, id, schema, table, columns}
+	return b.marked, b.markErr
 }
 
 var caller = mcpserver.Caller{UserID: 7, DatabaseID: 9, DatabaseName: "shop", Driver: "postgres"}
@@ -194,6 +202,57 @@ durationMs: 0
 note: tmphost is not connected
 rows[1]{id,name}:
   1,null`, text)
+}
+
+func TestMarkPIIIsOfferedOnlyWhenAllowed(t *testing.T) {
+	cs := session(t, &backend{})
+	assert.NotContains(t, cs.InitializeResult().Instructions, "markPii")
+	tools, err := cs.ListTools(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, mcpserver.ToolDescription, tools.Tools[0].Description)
+	text, _ := call(t, cs, "help", nil)
+	assert.NotContains(t, text, "markPii")
+
+	on := caller
+	on.AgentMarksPII = true
+	cs = sessionAs(t, &backend{}, on)
+	assert.Contains(t, cs.InitializeResult().Instructions, "mark it with markPii. Only the owner can unmark a column.")
+	tools, err = cs.ListTools(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, mcpserver.MarkPIIToolDescription, tools.Tools[0].Description)
+	assert.False(t, tools.Tools[0].Annotations.ReadOnlyHint, "markPii changes the PII set")
+	text, _ = call(t, cs, "help", nil)
+	assert.Contains(t, text, "  markPii        {")
+	assert.Less(t, strings.Index(text, "markPii"), strings.Index(text, "  help "))
+	text, _ = call(t, cs, "help", map[string]any{"topic": "markPii"})
+	assert.Contains(t, text, "only the owner can unmark one")
+	text, _ = call(t, cs, "drop", nil)
+	assert.Equal(t, `error: "unknown action \"drop\": use listTables, describeTable, query, markPii or help"`, text)
+}
+
+func TestMarkPII(t *testing.T) {
+	on := caller
+	on.AgentMarksPII = true
+	b := &backend{marked: &entity.PIIMarked{Table: "public.users", Marked: []string{"email", "phone"}, Already: []string{"name"}}}
+	cs := sessionAs(t, b, on)
+	text, isErr := call(t, cs, "markPii", map[string]any{"table": "users", "columns": []string{"email", "phone", "name"}})
+	require.False(t, isErr)
+	assert.Equal(t, `table: public.users
+marked: 2
+columns[3]{name,pii}:
+  email,marked
+  phone,marked
+  name,already`, text)
+	assert.Equal(t, []any{int64(7), int64(9), "", "users", []string{"email", "phone", "name"}}, b.markArgs)
+
+	_, isErr = call(t, cs, "markPii", map[string]any{"table": "users", "columns": "email"})
+	assert.True(t, isErr, "columns is a list")
+
+	b.markErr = crud.ErrAgentMarksPIIOff
+	text, isErr = call(t, cs, "markPii", map[string]any{"table": "users", "schema": "public", "columns": []string{"email"}})
+	assert.True(t, isErr)
+	assert.Contains(t, text, "the owner has not let agents mark PII columns")
+	assert.Equal(t, "public", b.markArgs[2])
 }
 
 func TestHandlerNeedsACaller(t *testing.T) {

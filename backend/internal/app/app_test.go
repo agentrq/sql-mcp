@@ -255,6 +255,10 @@ func TestDatabasesAPI(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, s.do(other, "PUT", db+"/pii", map[string]any{"piiColumns": []any{}}).status)
 	assert.Contains(t, s.do(c, "GET", db+"/pii", nil).body, `"column":"email"`)
 	assert.Equal(t, http.StatusNotFound, s.do(other, "GET", db+"/pii", nil).status)
+	res = s.do(c, "PUT", db+"/pii/agent", map[string]bool{"agentMarksPii": true})
+	assert.Equal(t, true, res.json(t)["database"].(map[string]any)["agentMarksPii"])
+	assert.Equal(t, http.StatusBadRequest, s.do(c, "PUT", db+"/pii/agent", "{", "Content-Type", "application/json").status)
+	assert.Equal(t, http.StatusNotFound, s.do(other, "PUT", db+"/pii/agent", map[string]bool{"agentMarksPii": false}).status)
 	assert.Contains(t, s.do(c, "GET", db+"/schema", nil).body, `"name":"email","dataType":"text","pii":true`)
 	assert.Equal(t, http.StatusNotFound, s.do(other, "GET", db+"/schema", nil).status)
 
@@ -431,6 +435,18 @@ func TestMCPOAuthFlow(t *testing.T) {
 	res = s.do(api, "POST", mcpURL, call, "Authorization", "Bearer "+access, "Content-Type", "application/json", "Accept", "application/json, text/event-stream", "Mcp-Protocol-Version", "2025-06-18")
 	require.Equal(t, http.StatusOK, res.status, res.body)
 	assert.Contains(t, res.body, `rowCount: 3`)
+
+	// markPii works once the owner turns it on, and only adds.
+	mark := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sql","arguments":{"action":"markPii","payload":{"table":"orders","columns":["total"]}}}}`
+	mcpHeaders := []string{"Authorization", "Bearer " + access, "Content-Type", "application/json", "Accept", "application/json, text/event-stream", "Mcp-Protocol-Version", "2025-06-18"}
+	res = s.do(api, "POST", mcpURL, mark, mcpHeaders...)
+	assert.Contains(t, res.body, "the owner has not let agents mark PII columns")
+	require.Equal(t, http.StatusOK, s.do(c, "PUT", "/api/v1/databases/"+id+"/pii/agent", map[string]bool{"agentMarksPii": true}).status)
+	res = s.do(api, "POST", mcpURL, initBody, mcpHeaders...)
+	assert.Contains(t, res.body, "mark it with markPii")
+	res = s.do(api, "POST", mcpURL, mark, mcpHeaders...)
+	assert.Contains(t, res.body, `columns[1]{name,pii}:\n  total,marked`)
+	assert.Contains(t, s.do(c, "GET", "/api/v1/databases/"+id+"/pii", nil).body, `"column":"total"`)
 
 	// Deleting the database revokes every grant.
 	require.Equal(t, http.StatusNoContent, s.do(c, "DELETE", "/api/v1/databases/"+id, nil).status)

@@ -142,14 +142,15 @@ func (c *Controller) MCPURL(id int64) string {
 
 func (c *Controller) toDatabase(d *model.Database, piiCount int) *entity.Database {
 	return &entity.Database{
-		ID:        FormatID(d.ID),
-		Name:      d.Name,
-		Driver:    d.Driver,
-		DSNMasked: d.DSNMasked,
-		PIICount:  piiCount,
-		MCPURL:    c.MCPURL(d.ID),
-		CreatedAt: d.CreatedAt,
-		UpdatedAt: d.UpdatedAt,
+		ID:            FormatID(d.ID),
+		Name:          d.Name,
+		Driver:        d.Driver,
+		DSNMasked:     d.DSNMasked,
+		PIICount:      piiCount,
+		AgentMarksPII: d.AgentMarksPII,
+		MCPURL:        c.MCPURL(d.ID),
+		CreatedAt:     d.CreatedAt,
+		UpdatedAt:     d.UpdatedAt,
 	}
 }
 
@@ -391,4 +392,90 @@ func (c *Controller) SetPII(ctx context.Context, userID, id int64, columns []ent
 		return nil, err
 	}
 	return c.ListPII(ctx, userID, id)
+}
+
+// SetAgentMarksPII lets, or stops, a database's MCP agent adding PII columns.
+func (c *Controller) SetAgentMarksPII(ctx context.Context, userID, id int64, on bool) (*entity.Database, error) {
+	if err := c.repo.SetAgentMarksPII(ctx, userID, id, on); err != nil {
+		return nil, mapErr(err)
+	}
+	return c.GetDatabase(ctx, userID, id)
+}
+
+// ErrAgentMarksPIIOff is an agent marking PII on a database whose owner has
+// not let it.
+var ErrAgentMarksPIIOff = entity.Invalid("the owner has not let agents mark PII columns on this database; ask them to turn it on in the PII columns tab")
+
+// AgentMarkPII marks columns of one table as PII for the database's MCP
+// agent, when its owner allows it. It only ever adds: a column already
+// marked stays marked, and nothing an agent sends unmarks one. Every column
+// must exist, so an agent can't fill the set with names that aren't there.
+func (c *Controller) AgentMarkPII(ctx context.Context, userID, id int64, schema, table string, columns []string) (*entity.PIIMarked, error) {
+	row, err := c.repo.GetDatabase(ctx, userID, id)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	if !row.AgentMarksPII {
+		return nil, ErrAgentMarksPIIOff
+	}
+	schema, table = strings.TrimSpace(schema), strings.TrimSpace(table)
+	if table == "" || len(columns) == 0 {
+		return nil, entity.Invalid("markPii needs a table and at least one column")
+	}
+	tables, err := c.Schema(ctx, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	var found []entity.SchemaTable
+	for _, t := range tables {
+		if strings.EqualFold(t.Name, table) && (schema == "" || strings.EqualFold(t.Schema, schema)) {
+			found = append(found, t)
+		}
+	}
+	switch {
+	case len(found) == 0:
+		return nil, entity.Invalid("there is no table " + table + "; listTables lists them")
+	case len(found) > 1:
+		return nil, entity.Invalid(table + " is in more than one schema; name the schema")
+	}
+	t := found[0]
+	out := &entity.PIIMarked{Table: t.Schema + "." + t.Name, Marked: []string{}, Already: []string{}}
+	var rows []model.PIIColumn
+	seen := map[string]bool{}
+	for _, name := range columns {
+		name = strings.TrimSpace(name)
+		var col *entity.SchemaColumn
+		for i := range t.Columns {
+			if strings.EqualFold(t.Columns[i].Name, name) {
+				col = &t.Columns[i]
+				break
+			}
+		}
+		switch {
+		case col == nil:
+			return nil, entity.Invalid(out.Table + " has no column " + name + "; describeTable lists them")
+		case seen[strings.ToLower(col.Name)]:
+			continue
+		case col.PII:
+			out.Already = append(out.Already, col.Name)
+		default:
+			out.Marked = append(out.Marked, col.Name)
+			rows = append(rows, model.PIIColumn{Schema: t.Schema, Table: t.Name, Column: col.Name})
+		}
+		seen[strings.ToLower(col.Name)] = true
+	}
+	if len(rows) == 0 {
+		return out, nil
+	}
+	counts, err := c.repo.CountPIIColumns(ctx, []int64{id})
+	if err == nil && counts[id]+len(rows) > maxPIIColumns {
+		err = entity.Invalid("too many PII columns")
+	}
+	if err == nil {
+		err = c.repo.AddPIIColumns(ctx, id, rows)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

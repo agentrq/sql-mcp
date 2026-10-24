@@ -53,9 +53,11 @@ type Database struct {
 	Driver    string
 	DSNMasked string
 	PIICount  int
-	MCPURL    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// AgentMarksPII is whether the MCP agent may add PII columns.
+	AgentMarksPII bool
+	MCPURL        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // PIIColumn is a column queries may not read.
@@ -63,6 +65,14 @@ type PIIColumn struct {
 	Schema string
 	Table  string
 	Column string
+}
+
+// PIIMarked is what an agent's markPii did to one table: the columns it
+// marked and those that were PII already.
+type PIIMarked struct {
+	Table   string
+	Marked  []string
+	Already []string
 }
 
 // SchemaColumn is a column, and whether it is or looks like PII.

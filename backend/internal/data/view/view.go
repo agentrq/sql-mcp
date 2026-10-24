@@ -54,6 +54,7 @@ type Database struct {
 	Driver         string    `json:"driver"`
 	DSNMasked      string    `json:"dsnMasked"`
 	PIIColumnCount int       `json:"piiColumnCount"`
+	AgentMarksPII  bool      `json:"agentMarksPii"`
 	MCPURL         string    `json:"mcpUrl"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
@@ -90,6 +91,10 @@ type PIIColumn struct {
 
 type PIIColumnsRequest struct {
 	PIIColumns []PIIColumn `json:"piiColumns"`
+}
+
+type AgentPIIRequest struct {
+	AgentMarksPII bool `json:"agentMarksPii"`
 }
 
 type PIIColumnsResponse struct {
@@ -166,7 +171,7 @@ func FromDrivers(in []entity.Driver) DriversResponse {
 func FromDatabase(d *entity.Database) Database {
 	return Database{
 		ID: d.ID, Name: d.Name, Driver: d.Driver, DSNMasked: d.DSNMasked, PIIColumnCount: d.PIICount,
-		MCPURL: d.MCPURL, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt,
+		AgentMarksPII: d.AgentMarksPII, MCPURL: d.MCPURL, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt,
 	}
 }
 

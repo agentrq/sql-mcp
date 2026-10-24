@@ -25,8 +25,11 @@ type Database struct {
 	DSNSealed string `gorm:"not null"`
 	// DSNMasked is the DSN with its password replaced, safe to show.
 	DSNMasked string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// AgentMarksPII lets the database's MCP agent add PII columns. It can
+	// never remove one; only the owner can.
+	AgentMarksPII bool `gorm:"not null;default:false"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // PIIColumn is a column queries may not read.

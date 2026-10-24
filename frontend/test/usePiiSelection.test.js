@@ -168,4 +168,19 @@ describe('usePiiSelection', () => {
     expect(s.dirty.value).toBe(false)
     expect(s.selectedCount.value).toBe(3)
   })
+
+  it('applies its changes onto a set that changed on the server', () => {
+    const s = setup()
+    s.setColumn(users, 'email', false)
+    s.setColumn(users, 'phone', true)
+    const latest = [
+      { schema: 'public', table: 'users', column: 'email' },
+      { schema: 'sales', table: 'orders', column: 'shipping_address' }, // the agent marked it meanwhile
+    ]
+    expect(s.toPayloadOnto(latest)).toEqual([
+      { schema: 'public', table: 'users', column: 'phone' },
+      { schema: 'sales', table: 'orders', column: 'shipping_address' },
+    ])
+    expect(s.toPayloadOnto()).toEqual([{ schema: 'public', table: 'users', column: 'phone' }])
+  })
 })

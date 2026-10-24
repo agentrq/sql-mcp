@@ -29,6 +29,7 @@ import (
 type Backend interface {
 	Schema(ctx context.Context, userID, id int64) ([]entity.SchemaTable, error)
 	RunQuery(ctx context.Context, rq crud.QueryRequest) (*entity.QueryResult, error)
+	AgentMarkPII(ctx context.Context, userID, id int64, schema, table string, columns []string) (*entity.PIIMarked, error)
 }
 
 // Caller is who a request is from and which database it is for.
@@ -39,6 +40,9 @@ type Caller struct {
 	// Driver is the engine's ID ("postgres", "mysql"), so the agent writes
 	// the right dialect.
 	Driver string
+	// AgentMarksPII offers the markPii action. The controller checks the
+	// database again on every call, so this only decides what is listed.
+	AgentMarksPII bool
 }
 
 type callerKey struct{}
@@ -67,6 +71,21 @@ const ToolDescription = "Read-only SQL on this database. Takes {action, payload}
 	"query {sql, store?} (one SELECT; PII columns, SELECT * over a table with PII, and writes are rejected), " +
 	"help {topic?}. Answers are TOON: a table names its columns once, then one line per row. Start with listTables."
 
+// MarkPIIToolDescription is the `sql` tool's description when the owner
+// lets the agent mark PII columns.
+const MarkPIIToolDescription = "Read-only SQL on this database. Takes {action, payload}. " +
+	"Actions: listTables (every table and view, and which columns are PII), " +
+	"describeTable {table, schema?} (columns and types), " +
+	"query {sql, store?} (one SELECT; PII columns, SELECT * over a table with PII, and writes are rejected), " +
+	"markPii {table, schema?, columns} (mark columns holding personal data as PII; a mark can't be undone), " +
+	"help {topic?}. Answers are TOON: a table names its columns once, then one line per row. Start with listTables."
+
+// markPIIInstructions is added to the server's instructions when the owner
+// lets the agent mark PII columns.
+const markPIIInstructions = "The owner lets you mark PII columns: when you find a column holding personal data " +
+	"(names, emails, phone numbers, addresses, birth dates, government IDs, IPs, free text about a person) that is not marked yet, " +
+	"mark it with markPii. Only the owner can unmark a column. "
+
 // dialect tells the agent which SQL to write, by driver ID. The MySQL
 // driver also serves MariaDB; its sql_mode has no ANSI_QUOTES and sets
 // NO_BACKSLASH_ESCAPES (see sqlguard), which is what the hint describes.
@@ -78,25 +97,31 @@ var dialect = map[string]string{
 }
 
 type input struct {
-	Action  string         `json:"action" jsonschema:"listTables, describeTable, query or help"`
+	Action  string         `json:"action" jsonschema:"listTables, describeTable, query, markPii (when the owner allows it) or help"`
 	Payload map[string]any `json:"payload,omitempty" jsonschema:"the action's fields; help prints them"`
 }
 
 // NewServer is the MCP server for one caller and database.
 func NewServer(backend Backend, caller Caller, version string) *mcp.Server {
+	description, marking := ToolDescription, ""
+	if caller.AgentMarksPII {
+		description, marking = MarkPIIToolDescription, markPIIInstructions
+	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "sql-mcp", Title: "SQL MCP: " + caller.DatabaseName, Version: version}, &mcp.ServerOptions{
 		Instructions: fmt.Sprintf("SQL MCP for the database %q. %s"+
 			"Use the `sql` tool: call listTables first, then query with explicit column lists. "+
-			"Columns marked PII cannot be selected, filtered, sorted or joined on; a query that touches one is rejected with the reason. "+
+			"Columns marked PII cannot be selected, filtered, sorted or joined on; a query that touches one is rejected with the reason. %s"+
 			"Large results come back cut to a preview with a temporary tmphost.io URL holding every row. "+
-			"Answers are TOON: `key: value` lines, and tables as `name[rows]{col,col}:` followed by one comma-separated line per row.", caller.DatabaseName, dialect[caller.Driver]),
+			"Answers are TOON: `key: value` lines, and tables as `name[rows]{col,col}:` followed by one comma-separated line per row.", caller.DatabaseName, dialect[caller.Driver], marking),
 	})
 	t := &tool{backend: backend, caller: caller}
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "sql",
 		Title:       "SQL",
-		Description: ToolDescription,
-		Annotations: &mcp.ToolAnnotations{Title: "Query " + caller.DatabaseName, ReadOnlyHint: true, IdempotentHint: true},
+		Description: description,
+		// markPii changes the PII set, so the tool is no longer read-only;
+		// it never touches the database itself.
+		Annotations: &mcp.ToolAnnotations{Title: "Query " + caller.DatabaseName, ReadOnlyHint: !caller.AgentMarksPII, IdempotentHint: true},
 	}, t.handle)
 	return srv
 }
@@ -116,6 +141,12 @@ type queryPayload struct {
 	Store bool   `json:"store,omitempty"`
 }
 
+type markPayload struct {
+	Table   string   `json:"table"`
+	Schema  string   `json:"schema,omitempty"`
+	Columns []string `json:"columns"`
+}
+
 type helpPayload struct {
 	Topic string `json:"topic,omitempty"`
 }
@@ -127,7 +158,13 @@ var help = map[string]string{
 	"query": "query {\"sql\": \"<one SELECT>\", \"store\": <bool, optional>} runs the query read-only. Refused: any statement but SELECT, more than one statement, " +
 		"a PII column anywhere (select list, WHERE, JOIN, ORDER BY), SELECT * or t.* or whole-row references over a table with PII, and functions that run SQL from text. " +
 		"The first rows come back inline as a TOON rows table after rowCount and the other totals; a larger result (or store: true) is stored whole as CSV on the owner's tmphost.io and its URL returned.",
+	"markPii": "markPii {\"table\": \"<name>\", \"schema\": \"<schema, optional>\", \"columns\": [\"email\", \"phone\"]} marks columns of one table as PII, " +
+		"so no query can read them from then on. It works only when the owner allows it. It only adds: a marked column stays marked, and only the owner can unmark one. " +
+		"Every column must exist. It returns a columns table: each column's name and whether it was marked now or was PII already.",
 }
+
+// markPIIUsage is the help line for markPii, listed only when it is offered.
+const markPIIUsage = "\n  markPii        {\"table\": \"users\", \"columns\": [\"email\"]} mark columns as PII; only the owner can unmark."
 
 func (t *tool) handle(ctx context.Context, _ *mcp.CallToolRequest, in input) (*mcp.CallToolResult, any, error) {
 	switch in.Action {
@@ -138,7 +175,10 @@ func (t *tool) handle(ctx context.Context, _ *mcp.CallToolRequest, in input) (*m
 		}
 		text, ok := help[p.Topic]
 		if !ok {
-			return errorResult("there is no action " + p.Topic + "; use listTables, describeTable, query or help"), nil, nil
+			return errorResult("there is no action " + p.Topic + "; use " + t.actions()), nil, nil
+		}
+		if p.Topic == "" && t.caller.AgentMarksPII {
+			text = strings.Replace(text, "\n  help ", markPIIUsage+"\n  help ", 1)
 		}
 		return textResult(text), nil, nil
 	case "listTables":
@@ -155,9 +195,22 @@ func (t *tool) handle(ctx context.Context, _ *mcp.CallToolRequest, in input) (*m
 			return errorResult(err.Error()), nil, nil
 		}
 		return t.query(ctx, p)
+	case "markPii":
+		var p markPayload
+		if err := decode(in.Payload, &p); err != nil {
+			return errorResult(err.Error()), nil, nil
+		}
+		return t.markPII(ctx, p)
 	default:
-		return errorResult(fmt.Sprintf("unknown action %q: use listTables, describeTable, query or help", in.Action)), nil, nil
+		return errorResult(fmt.Sprintf("unknown action %q: use %s", in.Action, t.actions())), nil, nil
 	}
+}
+
+func (t *tool) actions() string {
+	if t.caller.AgentMarksPII {
+		return "listTables, describeTable, query, markPii or help"
+	}
+	return "listTables, describeTable, query or help"
 }
 
 func (t *tool) schema(ctx context.Context) ([]entity.SchemaTable, error) {
@@ -236,6 +289,23 @@ func (t *tool) query(ctx context.Context, p queryPayload) (*mcp.CallToolResult, 
 	}
 	out = append(out, toon.Field{Key: "rows", Value: toon.Table{Columns: res.Columns, Rows: res.Rows}})
 	return toonResult(out)
+}
+
+func (t *tool) markPII(ctx context.Context, p markPayload) (*mcp.CallToolResult, any, error) {
+	res, err := t.backend.AgentMarkPII(ctx, t.caller.UserID, t.caller.DatabaseID, p.Schema, p.Table, p.Columns)
+	if err != nil {
+		return errorResult(err.Error()), nil, nil
+	}
+	cols := toon.Table{Columns: []string{"name", "pii"}}
+	for _, c := range res.Marked {
+		cols.Rows = append(cols.Rows, []any{c, "marked"})
+	}
+	for _, c := range res.Already {
+		cols.Rows = append(cols.Rows, []any{c, "already"})
+	}
+	return toonResult(toon.Object{
+		{Key: "table", Value: res.Table}, {Key: "marked", Value: len(res.Marked)}, {Key: "columns", Value: cols},
+	})
 }
 
 func decode(payload map[string]any, out any) error {

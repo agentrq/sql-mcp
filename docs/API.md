@@ -39,6 +39,7 @@ A database is one connection a person registered; it gets its own MCP server.
   "driver": "postgres",
   "dsnMasked": "postgres://app:****@db.internal:5432/analytics?sslmode=require",
   "piiColumnCount": 3,
+  "agentMarksPii": false,
   "mcpUrl": "https://sqlmcp.example.com/mcp/<id>",
   "createdAt": "RFC3339",
   "updatedAt": "RFC3339"
@@ -57,6 +58,7 @@ A database is one connection a person registered; it gets its own MCP server.
 | GET | `/databases/:id/schema` | | `{ "tables": [{ "schema": "public", "name": "users", "columns": [{ "name": "email", "dataType": "text", "pii": true, "suggestedPii": true }] }] }` |
 | GET | `/databases/:id/pii` | | `{ "piiColumns": [{ "schema": "public", "table": "users", "column": "email" }] }` |
 | PUT | `/databases/:id/pii` | `{ "piiColumns": [PiiColumn] }` (replaces the whole set; an empty `schema` is the engine's default: `public`, or the DSN's database on MySQL) | `{ "piiColumns": [PiiColumn] }` |
+| PUT | `/databases/:id/pii/agent` | `{ "agentMarksPii": true }` (lets the MCP agent add PII columns with `markPii`; it can never remove one) | `{ "database": Database }` |
 | POST | `/databases/:id/query` | `{ "sql": "select ..." }` | `{ "columns": ["id"], "rows": [[1]], "rowCount": 1, "truncated": false }`; a query touching a PII column is 422 with the reason |
 | GET | `/databases/:id/queries?limit=50` | | `{ "queries": [{ "id", "source": "mcp" \| "console", "sql", "status": "ok" \| "rejected" \| "error", "reason", "rowCount", "resultUrl", "durationMs", "createdAt" }] }` |
 | GET | `/databases/:id/queries/stream` | | `text/event-stream`: one `event: query` per query as it is recorded, `data` a query log entry as above and `id` its id; `: ping` comments every 25 s. 401 without a session, 404 for someone else's database |
@@ -96,7 +98,9 @@ registration, RFC 8414/9728 discovery and a server-rendered consent page:
 - `/mcp/{id}/oauth2/register`, `/mcp/{id}/oauth2/authorize`, `/mcp/{id}/oauth2/token`
 
 One tool, `sql`, taking `{ action, payload }`: `listTables`, `describeTable`,
-`query`, `help`.
+`query`, `help`, and `markPii` when the database's `agentMarksPii` is on (the
+tool is then no longer annotated read-only, and the instructions ask the agent
+to mark the personal data it finds).
 
 Answers are [TOON](https://toonformat.dev) text (spec v3, comma-delimited),
 which spends fewer tokens than JSON: a table names its columns once, then
@@ -119,7 +123,16 @@ query          rowCount: 120
                rows[25]{id,name}:
                  1,alice
                  2,null
+markPii        table: public.users               ({table, schema?, columns: [...]})
+               marked: 1
+               columns[2]{name,pii}:
+                 phone,marked
+                 email,already
 ```
+
+`markPii` only adds: every column must exist in the table, a column already
+marked is reported as `already`, and nothing an agent sends unmarks one. The
+setting is checked on every call, so turning it off stops an agent at once.
 
 A query result shows at most the inline limit (`QUERY_INLINE_ROWS`, default 25)
 of its rows.

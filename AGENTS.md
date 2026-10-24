@@ -47,6 +47,10 @@ app state). A handler never calls the repository directly.
   don't switch to the visitor. The guard parses as the server reads only
   because the driver forces `sql_mode` (no `ANSI_QUOTES`,
   `NO_BACKSLASH_ESCAPES`) and `utf8mb4`; a DSN must never loosen those.
+- **An agent can only add PII marks** (`markPii`, when the owner turns on
+  `agentMarksPii`). Never give MCP a way to unmark; that would let an agent
+  lift its own guard. The editor saves its diff onto the server's latest set,
+  so a save doesn't drop what the agent marked meanwhile.
 - **OAuth registrations, consents and codes are signed tokens, not rows.**
   Deleting a database revokes its grants because every token is checked
   against the database's current owner.

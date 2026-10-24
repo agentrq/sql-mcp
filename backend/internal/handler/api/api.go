@@ -88,6 +88,7 @@ func Register(p Params) {
 	r.Get("/databases/:id/schema", h.schema)
 	r.Get("/databases/:id/pii", h.getPII)
 	r.Put("/databases/:id/pii", h.setPII)
+	r.Put("/databases/:id/pii/agent", h.setAgentPII)
 	r.Post("/databases/:id/query", h.query)
 	r.Get("/databases/:id/queries", h.queries)
 
@@ -379,6 +380,18 @@ func (h *handler) getPII(c fiber.Ctx) error {
 		return respondErr(c, err)
 	}
 	return c.JSON(view.FromPIIColumns(cols))
+}
+
+func (h *handler) setAgentPII(c fiber.Ctx) error {
+	var rq view.AgentPIIRequest
+	if err := c.Bind().JSON(&rq); err != nil {
+		return badPayload(c)
+	}
+	d, err := h.crud.SetAgentMarksPII(c.Context(), userID(c), dbID(c), rq.AgentMarksPII)
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(view.DatabaseResponse{Database: view.FromDatabase(d)})
 }
 
 func (h *handler) setPII(c fiber.Ctx) error {

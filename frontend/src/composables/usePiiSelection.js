@@ -153,6 +153,19 @@ export function usePiiSelection() {
     return [...selected.value].sort().map(parseColumnKey)
   }
 
+  /**
+   * The `PUT /pii` list when the set may have changed on the server since it
+   * loaded (an agent marked a column): every column checked here, plus
+   * `latest`, less the ones unchecked here. A save never drops a column it
+   * didn't show unchecked.
+   */
+  function toPayloadOnto(latest = []) {
+    const next = new Set(latest.map((p) => columnKey(p.schema, p.table, p.column)))
+    for (const k of selected.value) next.add(k)
+    for (const k of saved.value) if (!selected.value.has(k)) next.delete(k)
+    return [...next].sort().map(parseColumnKey)
+  }
+
   /** After a save: the server's answer becomes both the saved and the current set. */
   function markSaved(piiColumns = null) {
     const next = piiColumns ? new Set(piiColumns.map((p) => columnKey(p.schema, p.table, p.column))) : new Set(selected.value)
@@ -183,6 +196,7 @@ export function usePiiSelection() {
     addedCount,
     removedCount,
     toPayload,
+    toPayloadOnto,
     markSaved,
   }
 }
